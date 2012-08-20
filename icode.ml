@@ -33,6 +33,7 @@ and block =
       mutable bl_body         : iterm option;
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: iterm list;
+      mutable bl_free_types   : ttype Symbols.Maps.t;
    }
 
 let rec dump_term (f: formatter) = function

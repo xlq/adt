@@ -51,6 +51,8 @@ and block =
          live when entering the block. *)
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: iterm list;
+      (* XXX: bl_free_types and bl_free are redundant! *)
+      mutable bl_free_types   : ttype Symbols.Maps.t;
    }
 
 val new_block_id: unit -> int

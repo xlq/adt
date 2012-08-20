@@ -133,6 +133,7 @@ let make_block
                bl_body           = None;
                bl_free           = Symbols.Sets.empty;
                bl_preconditions  = [];
+               bl_free_types     = Symbols.Maps.empty;
             }
          in
          state.st_blocks <- new_block :: state.st_blocks;

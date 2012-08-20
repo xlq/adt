@@ -2,10 +2,15 @@ open Big_int
 open Misc
 
 type ttype =
-   | Unknown_type of ttype option ref
+   | Unknown_type of unknown
    | Unit_type
    | Boolean_type of discriminant
    | Integer_type of discriminant
+
+and unknown = {
+   mutable unk_incoming : ttype list;
+   mutable unk_outgoing : ttype list;
+}
 
 and expr =
    | Boolean_literal of bool
@@ -82,11 +87,8 @@ let string_of_disc = function
    | Constrained i -> "(" ^ string_of_expr i ^ ")"
 
 let rec string_of_type = function
-   | Unknown_type t ->
-      begin match !t with
-         | None -> "<unknown>"
-         | Some t -> string_of_type t
-      end
+   | Unknown_type _ ->
+      "<unknown>"
    | Unit_type -> "Unit"
    | Boolean_type i ->
       "Boolean" ^ string_of_disc i

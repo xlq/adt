@@ -4,11 +4,21 @@ type ttype =
    (* Unknown_type means the compiler hasn't decided yet,
       but the type will be known by the time type checking
       is complete. *)
-   | Unknown_type of ttype option ref
+   | Unknown_type of unknown
    | Unit_type
    | Boolean_type of discriminant
    | Integer_type of discriminant
 
+and unknown = {
+   (* Incoming candidate types. These are types from
+      the contexts that Jump_terms are typed under. *)
+   mutable unk_incoming : ttype list;
+   (* Outgoing candidate types. These are the types
+      that this type is expected to have (or expected
+      to be coerced into). *)
+   mutable unk_outgoing : ttype list;
+}
+   
 and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
