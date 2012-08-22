@@ -205,6 +205,16 @@ let rec type_check
       in
       List.fold_left (fun constr quant -> quant constr)
          (Conjunction(constraints)) quants, Unit_type
+   | Static_assert_term(loc, expr, tail) ->
+      let expr_constr, expr_t =
+         type_check_expr
+            {context with
+               tc_expected =
+                  Some(Boolean_type(Constrained(Boolean_literal(true))))}
+            expr
+      in
+      let constr, t = type_check context tail in
+      Conjunction [expr_constr; constr], t
 
 let merge_types t1 t2 =
    try
@@ -251,7 +261,7 @@ let resolve_unknowns
 let type_check_blocks
    (blocks: block list)
    (entry_point: block)
-   ((parameters, preconditions): Icode.context * expr list)
+   (parameters: Icode.context)
 =
    (* For each block, create a new context with unknown types
       for live variables. *)
@@ -299,6 +309,11 @@ let type_check_blocks
             resolve_unknowns changed block.bl_free_types
       ) blocks
    done;
+
+   prerr_endline "Dumping blocks with computed types...";
+   let f = Formatting.new_formatter () in
+   dump_blocks f blocks;
+   prerr_endline (Formatting.get_fmt_str f);
 
    (* Second pass: check types. *)
    prerr_endline "Generating constraints.";

@@ -25,6 +25,7 @@ type iterm =
                     * iterm (* false part *)
    | Jump_term of jump_info
    | Inspect_type_term of loc * symbol * iterm
+   | Static_assert_term of loc * expr * iterm
 
 and jump_info =
    {
@@ -50,7 +51,7 @@ and block =
          Analogous to the variables that are
          live when entering the block. *)
       mutable bl_free         : Symbols.Sets.t;
-      mutable bl_preconditions: iterm list;
+      mutable bl_preconditions: expr list;
       (* XXX: bl_free_types and bl_free are redundant! *)
       mutable bl_free_types   : ttype Symbols.Maps.t;
    }

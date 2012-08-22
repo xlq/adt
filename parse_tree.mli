@@ -41,6 +41,7 @@ and statement =
                        * statement  (* body *)
                        * statement  (* continuation *)
    | Inspect_type of loc * dotted_name * statement
+   | Static_assert of loc * expr * statement
 
 and expr =
    | Name of loc * dotted_name

@@ -27,7 +27,8 @@ let keywords = create_hashtable 10 [
    "given",       GIVEN;
    "True",        TRUE;
    "False",       FALSE;
-   "Inspect_Type",INSPECT_TYPE;
+   "Inspect_Type", INSPECT_TYPE;
+   "Static_Assert", STATIC_ASSERT;
 ]
 
 }

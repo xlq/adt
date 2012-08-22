@@ -24,7 +24,8 @@ let check_end (pos1, name1) (pos2, name2) =
 
 /* Keywords */
 %token PROCEDURE NULL END AND OR VAR IS IF THEN ELSE ELSIF
-%token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE INSPECT_TYPE
+%token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE
+%token INSPECT_TYPE STATIC_ASSERT
 
 /* Punctuation */
 %token COLON SEMICOLON DOT DOTDOT COMMA ASSIGN RARROW
@@ -93,6 +94,8 @@ ne_statements:
    | while_loop { $1 }
    | INSPECT_TYPE dotted_name SEMICOLON statements
       { Inspect_type(pos (), $2, $4) }
+   | STATIC_ASSERT expr SEMICOLON statements
+      { Static_assert(pos (), $2, $4) }
 
 statements:
    | /* empty */ { No_statement(pos ()) }

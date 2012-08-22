@@ -202,6 +202,10 @@ let rec translate_statement
                (* ignore it *)
                translate_statement state context tail
          end
+      | Parse_tree.Static_assert(loc,expr,tail) ->
+         Static_assert_term(loc,
+            translate_expr context expr,
+            translate_statement state context tail)
 
 and translate_block
    (state: state)
@@ -267,6 +271,8 @@ let translate (sub: Parse_tree.subprogram): unit =
          sub.Parse_tree.sub_body
    in
 
+   entry_point.bl_preconditions <- preconditions;
+
    calculate_free_names state.st_blocks;
    let f = new_formatter () in
    dump_blocks f state.st_blocks;
@@ -274,4 +280,4 @@ let translate (sub: Parse_tree.subprogram): unit =
    Type_checking.type_check_blocks
       state.st_blocks
       entry_point
-      (parameters, preconditions)
+      parameters

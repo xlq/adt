@@ -18,6 +18,7 @@ type iterm =
    | If_term of loc * expr * iterm * iterm
    | Jump_term of jump_info
    | Inspect_type_term of loc * symbol * iterm
+   | Static_assert_term of loc * expr * iterm
 
 and jump_info =
    {
@@ -32,7 +33,7 @@ and block =
       bl_statement            : Parse_tree.statement;
       mutable bl_body         : iterm option;
       mutable bl_free         : Symbols.Sets.t;
-      mutable bl_preconditions: iterm list;
+      mutable bl_preconditions: expr list;
       mutable bl_free_types   : ttype Symbols.Maps.t;
    }
 
@@ -52,6 +53,10 @@ let rec dump_term (f: formatter) = function
       puts f ("tail block" ^ string_of_int bl.bl_id)
    | Inspect_type_term(_,_,tail) ->
       dump_term f tail
+   | Static_assert_term(_,expr,tail) ->
+      puts f ("Static_Assert " ^ string_of_expr expr ^ ";");
+      break f;
+      dump_term f tail
 
 let dump_block (f: formatter) (bl: block) =
    match bl.bl_body with
@@ -59,13 +64,24 @@ let dump_block (f: formatter) (bl: block) =
       | Some e ->
          puts f ("block" ^ string_of_int bl.bl_id ^ ":");
          break f;
-         if not (Symbols.Sets.is_empty bl.bl_free) then begin
-            puts f "Free:";
+         if not (Symbols.Maps.is_empty bl.bl_free_types) then begin
+            Symbols.Maps.iter (fun x t ->
+               puts f ("| "
+                  ^ full_name x ^ ": "
+                  ^ string_of_type t);
+               break f
+            ) bl.bl_free_types
+         end else if not (Symbols.Sets.is_empty bl.bl_free) then begin
             Symbols.Sets.iter (fun x ->
-               puts f (" " ^ full_name x)
-            ) bl.bl_free;
-            break f
+               puts f ("| " ^ full_name x ^ ": <unknown>");
+               break f
+            ) bl.bl_free
          end;
+         List.iter (fun p ->
+            puts f ("| "
+               ^ string_of_expr p);
+            break f
+         ) bl.bl_preconditions;
          indent f;
          dump_term f e;
          undent f; break f
@@ -96,6 +112,10 @@ let calculate_free_names (blocks: block list): unit =
             jump.jmp_bound <- bound;
             jumps := (block, jump) :: !jumps;
             free
+         | Static_assert_term(loc, expr, tail) ->
+            search
+               (esearch free bound expr)
+               bound tail
       and esearch (free: Symbols.Sets.t) (bound: Symbols.Sets.t):
          expr -> Symbols.Sets.t
       = function
