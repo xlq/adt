@@ -1,4 +1,6 @@
 open Big_int
+
+type version
  
 type ttype =
    (* Unknown_type means the compiler hasn't decided yet,
@@ -6,8 +8,8 @@ type ttype =
       is complete. *)
    | Unknown_type of unknown
    | Unit_type
-   | Boolean_type of discriminant
-   | Integer_type of discriminant
+   | Boolean_type
+   | Integer_type
 
 and unknown = {
    (* Incoming candidate types. These are types from
@@ -23,16 +25,11 @@ and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
    | Var of symbol
+   | Var_version of symbol * version
    | Equal of expr * expr
-   | For_all of symbol * expr
+   | For_all of symbol * version * expr
    | Conjunction of expr list
    | Implication of expr * expr
-
-and discriminant =
-   (* Symbol represents source of type, and is used
-      to create fresh variables. *)
-   | Unconstrained of symbol option
-   | Constrained of expr
 
 and symbol = {
    sym_id               : int; (* unique identifier *)
@@ -40,10 +37,12 @@ and symbol = {
    sym_parent           : symbol option;
    mutable sym_children : symbol list;
    mutable sym_info     : symbol_info;
+   mutable sym_last_version
+                        : version;
 }
 
 and symbol_info =
-   | Unfinished_sym
+   | Unfinished_sym (* symbol_info not yet set *)
    | Package_sym
    | Subprogram_sym
    | Variable_sym
@@ -55,12 +54,13 @@ module Sets    : Set.S with type elt = symbol
 
 val root_symbol : symbol
 val full_name : symbol -> string
+val full_name_with_version : symbol -> version -> string
 val string_of_type : ttype -> string
 val string_of_expr : expr -> string
 val describe_symbol : symbol -> string
 val find_in : symbol -> string -> symbol option
 val new_symbol : symbol -> string -> symbol_info -> symbol
+val new_version : symbol -> version
 val find : symbol -> string -> symbol option
 val find_variable : symbol -> string -> symbol
 val dump_symbols : unit -> unit
-val fresh_symbol : symbol -> symbol

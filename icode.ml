@@ -10,8 +10,6 @@ let new_block_id () =
 
 type loc = Parse_tree.loc
 
-type context = ttype Symbols.Maps.t
-
 type iterm =
    | Null_term of loc
    | Assignment_term of loc * symbol * expr * iterm
@@ -34,7 +32,7 @@ and block =
       mutable bl_body         : iterm option;
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: expr list;
-      mutable bl_free_types   : ttype Symbols.Maps.t;
+      mutable bl_in           : (ttype * version) Symbols.Maps.t;
    }
 
 let rec dump_term (f: formatter) = function
@@ -64,13 +62,13 @@ let dump_block (f: formatter) (bl: block) =
       | Some e ->
          puts f ("block" ^ string_of_int bl.bl_id ^ ":");
          break f;
-         if not (Symbols.Maps.is_empty bl.bl_free_types) then begin
-            Symbols.Maps.iter (fun x t ->
+         if not (Symbols.Maps.is_empty bl.bl_in) then begin
+            Symbols.Maps.iter (fun x (t, x_ver) ->
                puts f ("| "
-                  ^ full_name x ^ ": "
-                  ^ string_of_type t);
+                  ^ full_name_with_version x x_ver
+                  ^ ": " ^ string_of_type t);
                break f
-            ) bl.bl_free_types
+            ) bl.bl_in
          end else if not (Symbols.Sets.is_empty bl.bl_free) then begin
             Symbols.Sets.iter (fun x ->
                puts f ("| " ^ full_name x ^ ": <unknown>");

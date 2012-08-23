@@ -48,13 +48,12 @@ let get_loc_of_expression = function
 
 let rec translate_type
    (context: context)
-   (owning_sym: symbol)
    (typ: Parse_tree.ttype): ttype
 = match typ with
    | Parse_tree.Named_type(loc, ["Boolean"]) ->
-      Boolean_type(Unconstrained(Some owning_sym))
+      Boolean_type
    | Parse_tree.Named_type(loc, ["Integer"]) ->
-      Integer_type(Unconstrained(Some owning_sym))
+      Integer_type
    | Parse_tree.Named_type(loc, name) ->
       Errors.semantic_error loc
          ("Undefined type `" ^ String.concat "." name ^ "'.");
@@ -133,7 +132,7 @@ let make_block
                bl_body           = None;
                bl_free           = Symbols.Sets.empty;
                bl_preconditions  = [];
-               bl_free_types     = Symbols.Maps.empty;
+               bl_in             = Symbols.Maps.empty;
             }
          in
          state.st_blocks <- new_block :: state.st_blocks;
@@ -251,7 +250,7 @@ let translate (sub: Parse_tree.subprogram): unit =
                         Unfinished_sym
                      in
                      let t = translate_type
-                        context sym
+                        context 
                         param.Parse_tree.param_type
                      in
                      sym.sym_info <- Parameter_sym(t);

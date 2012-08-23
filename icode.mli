@@ -13,8 +13,6 @@ open Symbols
 
 type loc = Parse_tree.loc
 
-type context = ttype Symbols.Maps.t
-
 type iterm =
    | Null_term of loc
    | Assignment_term of loc * symbol (* destination *)
@@ -53,7 +51,7 @@ and block =
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: expr list;
       (* XXX: bl_free_types and bl_free are redundant! *)
-      mutable bl_free_types   : ttype Symbols.Maps.t;
+      mutable bl_in           : (ttype * version) Symbols.Maps.t;
    }
 
 val new_block_id: unit -> int
