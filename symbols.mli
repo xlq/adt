@@ -1,6 +1,9 @@
 open Big_int
 
 type version
+
+type operator =
+   | EQ | NE | LT | GT | LE | GE
  
 type ttype =
    (* Unknown_type means the compiler hasn't decided yet,
@@ -26,7 +29,7 @@ and expr =
    | Integer_literal of big_int
    | Var of symbol
    | Var_version of symbol * version
-   | Equal of expr * expr
+   | Operation of operator * expr * expr
    | For_all of symbol * version * expr
    | Conjunction of expr list
    | Implication of expr * expr

@@ -46,7 +46,8 @@ let rec coerce context t1 t2: constraints * ttype =
       match t1, t2 with
          | Unit_type, Unit_type ->
             no_constraints, Unit_type
-         | Boolean_type, Boolean_type ->
+         | Boolean_type, Boolean_type
+         | Integer_type, Integer_type ->
             no_constraints, t1
          | Unknown_type(unk), t2 ->
             begin match context.tc_pass with
@@ -94,6 +95,15 @@ let rec type_check_expr
       let t, version = Symbols.Maps.find x context.tc_vars in
       let constr, t = got_type context t in
       Var_version(x, version), constr, t
+   | Operation((EQ|NE|LT|GT|LE|GE) as op, lhs, rhs) ->
+      let operand_context = {context with tc_expected = None} in
+      let lhs, lhs_c, lhs_t = type_check_expr operand_context lhs in
+      let rhs, rhs_c, rhs_t = type_check_expr operand_context rhs in
+      let _ = coerce context lhs_t rhs_t in
+      let constr, result_t = got_type context Boolean_type in
+      (Operation(op, lhs, rhs),
+       Conjunction [lhs_c; rhs_c; constr],
+       result_t)
 
 let rec type_check
    (context: context)
@@ -138,10 +148,10 @@ let rec type_check
       (Conjunction [
             condition_constr;
             Implication(
-               Equal(condition, Boolean_literal true),
+               Operation(EQ, condition, Boolean_literal true),
                true_part_constr);
             Implication(
-               Equal(condition, Boolean_literal false),
+               Operation(EQ, condition, Boolean_literal false),
                false_part_constr)
       ]), Unit_type
    | Jump_term(jmp) ->

@@ -30,9 +30,12 @@ let check_end (pos1, name1) (pos2, name2) =
 /* Punctuation */
 %token COLON SEMICOLON DOT DOTDOT COMMA ASSIGN RARROW
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
+%token EQ NE LT LE GT GE
 
 /* Other */
 %token EOF
+
+%nonassoc EQ NE LT LE GT GE
 
 %start subprogram
 %type <Parse_tree.subprogram> subprogram
@@ -120,7 +123,13 @@ while_loop:
       { While_loop(pos (), $2, $4, $8) }
 
 expr:
-   | dotted_name { Name(pos (), $1) }
-   | INTEGER { Integer_literal(pos (), $1) }
-   | TRUE { Boolean_literal(pos (), true) }
-   | FALSE { Boolean_literal(pos (), false) }
+   | dotted_name  { Name(pos (), $1) }
+   | INTEGER      { Integer_literal(pos (), $1) }
+   | TRUE         { Boolean_literal(pos (), true) }
+   | FALSE        { Boolean_literal(pos (), false) }
+   | expr EQ expr { Operation(rhs_end_pos 2, Symbols.EQ, $1, $3) }
+   | expr NE expr { Operation(rhs_end_pos 2, Symbols.NE, $1, $3) }
+   | expr LT expr { Operation(rhs_end_pos 2, Symbols.LT, $1, $3) }
+   | expr GT expr { Operation(rhs_end_pos 2, Symbols.GT, $1, $3) }
+   | expr LE expr { Operation(rhs_end_pos 2, Symbols.LE, $1, $3) }
+   | expr GE expr { Operation(rhs_end_pos 2, Symbols.GE, $1, $3) }

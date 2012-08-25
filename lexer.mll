@@ -47,17 +47,23 @@ rule scan = parse
          with Not_found -> IDENT(id)
       }
    | ['0'-'9']+ as value { INTEGER(big_int_of_string value) }
-   | '(' { LPAREN }
-   | ')' { RPAREN }
-   | '[' { LBRACKET }
-   | ']' { RBRACKET }
-   | '{' { LBRACE }
-   | '}' { RBRACE }
-   | ':' { COLON }
-   | ';' { SEMICOLON }
-   | '.' { DOT }
-   | ',' { COMMA }
+   | '('  { LPAREN }
+   | ')'  { RPAREN }
+   | '['  { LBRACKET }
+   | ']'  { RBRACKET }
+   | '{'  { LBRACE }
+   | '}'  { RBRACE }
+   | ':'  { COLON }
+   | ';'  { SEMICOLON }
+   | '.'  { DOT }
+   | ','  { COMMA }
    | ":=" { ASSIGN }
    | ".." { DOTDOT }
    | "=>" { RARROW }
-   | eof { EOF }
+   | '='  { EQ }
+   | "<>" { NE }
+   | '<'  { LT }
+   | '>'  { GT }
+   | "<=" { LE }
+   | ">=" { GE }
+   | eof  { EOF }

@@ -126,6 +126,8 @@ let calculate_free_names (blocks: block list): unit =
                (* x is not bound - it was live at the start of this block. *)
                Symbols.Sets.add x free
             end
+         | Operation(op, lhs, rhs) ->
+            esearch (esearch free bound lhs) bound rhs
       in
       block.bl_free <- search Symbols.Sets.empty Symbols.Sets.empty
          (unsome block.bl_body)

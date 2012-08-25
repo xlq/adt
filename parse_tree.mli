@@ -47,3 +47,4 @@ and expr =
    | Name of loc * dotted_name
    | Boolean_literal of loc * bool
    | Integer_literal of loc * big_int
+   | Operation of loc * Symbols.operator * expr * expr

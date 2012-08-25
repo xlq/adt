@@ -3,6 +3,9 @@ open Misc
 
 type version = int
 
+type operator =
+   | EQ | NE | LT | GT | LE | GE
+
 type ttype =
    | Unknown_type of unknown
    | Unit_type
@@ -19,7 +22,7 @@ and expr =
    | Integer_literal of big_int
    | Var of symbol
    | Var_version of symbol * version
-   | Equal of expr * expr
+   | Operation of operator * expr * expr
    | For_all of symbol * version * expr
    | Conjunction of expr list
    | Implication of expr * expr
@@ -71,14 +74,24 @@ let rec full_name sym =
 let full_name_with_version sym version =
    full_name sym ^ "#" ^ string_of_int version
 
+let string_of_op = function
+   | EQ -> "="
+   | NE -> "<>"
+   | LT -> "<"
+   | GT -> ">"
+   | LE -> "<="
+   | GE -> ">="
+
 let rec string_of_expr = function
    | Boolean_literal true -> "True"
    | Boolean_literal false -> "False"
    | Integer_literal i -> string_of_big_int i
    | Var sym -> full_name sym
    | Var_version(sym,version) -> full_name_with_version sym version
-   | Equal(m,n) ->
-      string_of_expr m ^ " = " ^ string_of_expr n
+   | Operation(op,m,n) ->
+      string_of_expr m ^ " "
+         ^ string_of_op op ^ " "
+         ^ string_of_expr n
    | For_all(a,aver,m) ->
       "{" ^ full_name_with_version a aver ^ "} " ^ string_of_expr m
    | Conjunction p ->

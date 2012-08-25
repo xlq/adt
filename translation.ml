@@ -59,7 +59,7 @@ let rec translate_type
          ("Undefined type `" ^ String.concat "." name ^ "'.");
       raise Bail_out
 
-let translate_expr
+let rec translate_expr
    (context: context)
    (expression: Parse_tree.expr): expr
 =
@@ -77,6 +77,10 @@ let translate_expr
          end
       | Parse_tree.Boolean_literal(loc, b) -> Boolean_literal(b)
       | Parse_tree.Integer_literal(loc, i) -> Integer_literal(i)
+      | Parse_tree.Operation(loc, op, lhs, rhs) ->
+         Operation(op,
+            translate_expr context lhs,
+            translate_expr context rhs)
 
 let translate_lvalue
    (context: context)

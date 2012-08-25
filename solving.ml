@@ -17,7 +17,7 @@ let rec subst (x_sym, x_version) replacement m =
       | Integer_literal _ -> m
       | Var_version(x,v) when (x == x_sym) && (v = x_version) -> replacement
       | Var_version _ -> m
-      | Equal(i,j) -> Equal(r i, r j)
+      | Operation(op,i,j) -> Operation(op, r i, r j)
       | For_all(x,v,n) when (x == x_sym) && (v = x_version) -> m
       | For_all(x,v,n) -> For_all(x,v,r n)
       | Conjunction p -> Conjunction (List.map r p)
@@ -35,12 +35,34 @@ let convert (constr: expr): inequality list =
       | Var_version(x,v) ->
          (* Must be boolean *)
          (pos, (Var_version(x,v))::neg)
+      | Operation(EQ, m, Boolean_literal(true))
+      | Operation(EQ, Boolean_literal(true), m)
+      | Operation(NE, m, Boolean_literal(false))
+      | Operation(NE, Boolean_literal(false), m) ->
+         (pos, m::neg)
+      | Operation(EQ, m, Boolean_literal(false))
+      | Operation(EQ, Boolean_literal(false), m)
+      | Operation(NE, m, Boolean_literal(true))
+      | Operation(NE, Boolean_literal(true), m) ->
+         (m::pos, neg)
+      | Operation((LT|GT|LE|GE), lhs, rhs) as m ->
+         (pos, m::neg)
 
    and positive (pos, neg) = function
-      | Equal(i,j) ->
-         (Equal(i,j)::pos, neg)
       | Conjunction p ->
          List.fold_left (fun ax p -> positive ax p) (pos, neg) p
+      | Operation(EQ, m, Boolean_literal(true))
+      | Operation(EQ, Boolean_literal(true), m)
+      | Operation(NE, m, Boolean_literal(false))
+      | Operation(NE, Boolean_literal(false), m) ->
+         (m::pos, neg)
+      | Operation(EQ, m, Boolean_literal(false))
+      | Operation(EQ, Boolean_literal(false), m)
+      | Operation(NE, m, Boolean_literal(true))
+      | Operation(NE, Boolean_literal(true), m) ->
+         (pos, m::neg)
+      | Operation((LT|GT|LE|GE), lhs, rhs) as m ->
+         (m::pos, neg)
    in
 
    let pos, neg = negative ([], []) constr in
