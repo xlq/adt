@@ -3,12 +3,18 @@ open Icode
 open Misc
 
 type pass =
+   (* Guessing pass - unknown types are guessed. *)
    | Guessing_pass
+   (* Checking pass - unknown types are rejected. *)
    | Checking_pass
 
 type context = {
+   (* The current pass. *)
    tc_pass     : pass;
+   (* The types and current versions of variables. *)
    tc_vars     : (ttype * version) Symbols.Maps.t;
+   (* The type that's expected of the term or expression being
+      typed under this context. *)
    tc_expected : ttype option;
 }
 
@@ -273,5 +279,8 @@ let type_check_blocks
       in
       let constraints = quantify block.bl_in constraints in
       prerr_endline ("Constraints: "
-         ^ string_of_expr constraints)
+         ^ string_of_expr constraints);
+      Solving.solve
+         (Symbols.Maps.map snd block.bl_in)
+         constraints
    ) blocks
