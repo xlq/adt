@@ -76,15 +76,18 @@ let got_type
 
 let rec type_check_expr
    (context: context)
-   (expr: expr): constraints * ttype
+   (expr: expr): expr * constraints * ttype
 = match expr with
    | Boolean_literal(b) ->
-      got_type context Boolean_type
+      let constr, t = got_type context Boolean_type in
+      Boolean_literal(b), constr, t
    | Integer_literal(i) ->
-      got_type context Integer_type
+      let constr, t = got_type context Integer_type in
+      Integer_literal(i), constr, t
    | Var(x) ->
       let t, version = Symbols.Maps.find x context.tc_vars in
-      got_type context t
+      let constr, t = got_type context t in
+      Var_version(x, version), constr, t
 
 let rec type_check
    (context: context)
@@ -93,7 +96,7 @@ let rec type_check
    | Null_term(loc) ->
       got_type context Unit_type
    | Assignment_term(loc, dest, src, tail) ->
-      let src_constr, src_type =
+      let src, src_constr, src_type =
          type_check_expr
             {context with tc_expected = None}
             src
@@ -108,7 +111,7 @@ let rec type_check
       (Conjunction [src_constr; tail_constr]),
          tail_type
    | If_term(loc, condition, true_part, false_part) ->
-      let condition_constr, condition_type =
+      let condition, condition_constr, condition_type =
          type_check_expr
             {context with
                tc_expected = Some Boolean_type}
@@ -148,7 +151,7 @@ let rec type_check
       in
       Conjunction constraints, Unit_type
    | Static_assert_term(loc, expr, tail) ->
-      let expr_constr, expr_t =
+      let expr, expr_constr, expr_t =
          type_check_expr
             {context with
                tc_expected =

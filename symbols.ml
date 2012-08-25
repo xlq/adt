@@ -76,6 +76,7 @@ let rec string_of_expr = function
    | Boolean_literal false -> "False"
    | Integer_literal i -> string_of_big_int i
    | Var sym -> full_name sym
+   | Var_version(sym,version) -> full_name_with_version sym version
    | Equal(m,n) ->
       string_of_expr m ^ " = " ^ string_of_expr n
    | For_all(a,aver,m) ->
