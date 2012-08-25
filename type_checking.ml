@@ -21,8 +21,6 @@ type context = {
    tc_facts    : expr list;
 }
 
-type expr_context = expr -> expr
-
 exception Type_error
 exception Unresolved_unknown
 exception Unsolved_constraint
@@ -81,6 +79,12 @@ let rec expressions_match m n =
       | Comparison(op, lhs, rhs), Comparison(op', lhs', rhs') ->
          (op = op') && (expressions_match lhs lhs')
                     && (expressions_match rhs rhs')
+      | Boolean_literal _, _ | _, Boolean_literal _
+      | Integer_literal _, _ | _, Integer_literal _
+      | Var_version _, _ | _, Var_version _
+      | Negation _, _ | _, Negation _
+      | Comparison _, _ | _, Comparison _ ->
+         false
 
 let prove
    (context: context)
@@ -95,11 +99,24 @@ let prove
       ^ String.concat " and "
          (List.map string_of_expr facts));
    *)
-   if List.exists (expressions_match e) facts then begin
+   if List.exists (expressions_match e) facts then
+      (* Trivial case: we already know e is true. *)
       ()
-   end else begin
-      raise Unsolved_constraint
-   end
+   else match e with
+      | Comparison((LT|LE), lhs, rhs) ->
+         let linear_e = Fm_solver.linearise e in
+         let linear_facts =
+            List.fold_left (fun linear_facts fact ->
+               try
+                  Fm_solver.linearise fact @ linear_facts
+               with Fm_solver.Non_linear_constraint ->
+                  linear_facts
+            ) [] facts
+         in
+         let inequalities = linear_facts @ (List.map Fm_solver.negate linear_e) in
+         (* We must now prove that the inequalities are not satisfiable. *)
+         try Fm_solver.solve inequalities
+         with Fm_solver.Contradiction -> ()
 
 let rec coerce context t1 t2: ttype =
    try
