@@ -1,6 +1,7 @@
 open Symbols
 open Icode
 open Misc
+open Big_int
 
 type pass =
    (* Guessing pass - unknown types are guessed. *)
@@ -16,45 +17,104 @@ type context = {
    (* The type that's expected of the term or expression being
       typed under this context. *)
    tc_expected : ttype option;
+   (* Boolean expressions known true. *)
+   tc_facts    : expr list;
 }
 
 type expr_context = expr -> expr
 
 exception Type_error
-
 exception Unresolved_unknown
-
-type constraints = expr
-let no_constraints = Boolean_literal true
+exception Unsolved_constraint
 
 let assert_unit t =
    assert (match t with
       | Unit_type -> true
       | _ -> false)
 
-let quantify
-   (vars: (ttype * version) Symbols.Maps.t)
-   (constr: constraints): constraints
+(* Get versions for the variables in the given expression.
+   I.e. change all Var to Var_version. *)
+let rec bind_versions
+   (get_version : symbol -> version)
+   (e: expr): expr
 =
-   Symbols.Maps.fold
-      (fun parameter_sym (parameter_type, parameter_version) constr ->
-         For_all(parameter_sym, parameter_version, constr))
-      vars constr
+   let r = bind_versions get_version in
+   match e with
+   | Boolean_literal _
+   | Integer_literal _
+   | Var_version _ -> e
+   | Var(x) -> Var_version(x, get_version x)
+   | Comparison(op, lhs, rhs) ->
+      Comparison(op, r lhs, r rhs)
 
-let rec coerce context t1 t2: constraints * ttype =
+let negate = function
+   | Boolean_literal(b) -> Some(Boolean_literal(not b))
+   | Integer_literal _ | Var _ | Var_version _ -> None
+   | Comparison(op, lhs, rhs) ->
+      Some(Comparison(
+         (match op with
+            | EQ -> NE | NE -> EQ
+            | LT -> GE | GE -> LT
+            | LE -> GT | GT -> LE),
+         lhs, rhs))
+
+let rec normalise (e: expr) =
+   match e with
+      | Boolean_literal _ | Integer_literal _
+      | Var _ | Var_version _ -> e
+      | Negation(e) ->
+         begin match negate e with
+            | Some e' -> normalise e'
+            | None -> Negation(normalise e)
+         end
+      | Comparison((EQ|NE|LT|LE), _, _) -> e
+      | Comparison(GT, lhs, rhs) -> Comparison(LT, rhs, lhs)
+      | Comparison(GE, lhs, rhs) -> Comparison(LE, rhs, lhs)
+
+let rec expressions_match m n =
+   match m, n with
+      | Boolean_literal(b), Boolean_literal(b') -> b = b'
+      | Integer_literal(i), Integer_literal(i') -> eq_big_int i i'
+      | Var_version(x,v), Var_version(x',v') ->
+         (x == x') && (v = v')
+      | Negation(x), Negation(x') -> expressions_match x x'
+      | Comparison(op, lhs, rhs), Comparison(op', lhs', rhs') ->
+         (op = op') && (expressions_match lhs lhs')
+                    && (expressions_match rhs rhs')
+
+let prove
+   (context: context)
+   (e: expr): unit
+=
+   let facts = List.map normalise context.tc_facts in
+   let e = normalise e in
+   (*
+   prerr_endline ("Must prove "
+      ^ string_of_expr e
+      ^ " under the assumptions: "
+      ^ String.concat " and "
+         (List.map string_of_expr facts));
+   *)
+   if List.exists (expressions_match e) facts then begin
+      ()
+   end else begin
+      raise Unsolved_constraint
+   end
+
+let rec coerce context t1 t2: ttype =
    try
       match t1, t2 with
          | Unit_type, Unit_type ->
-            no_constraints, Unit_type
+            Unit_type
          | Boolean_type, Boolean_type
          | Integer_type, Integer_type ->
-            no_constraints, t1
+            t1
          | Unknown_type(unk), t2 ->
             begin match context.tc_pass with
                | Guessing_pass ->
                   prerr_endline "Coercing from Unknown_type.";
                   unk.unk_outgoing <- t2 :: unk.unk_outgoing;
-                  no_constraints, t2
+                  t2
                | Checking_pass ->
                   raise Unresolved_unknown
             end
@@ -63,7 +123,7 @@ let rec coerce context t1 t2: constraints * ttype =
                | Guessing_pass ->
                   prerr_endline "Coercing to Unknown_type.";
                   unk.unk_incoming <- t1 :: unk.unk_incoming;
-                  no_constraints, t1
+                  t1
                | Checking_pass ->
                   raise Unresolved_unknown
             end
@@ -75,69 +135,73 @@ let rec coerce context t1 t2: constraints * ttype =
 
 let got_type
    (context: context)
-   (t: ttype): constraints * ttype
+   (t: ttype): ttype
 =
    match context.tc_expected with
-      | None -> (no_constraints, t)
+      | None -> t
       | Some t2 -> coerce context t t2
 
 let rec type_check_expr
    (context: context)
-   (expr: expr): expr * constraints * ttype
+   (expr: expr): expr * ttype
 = match expr with
    | Boolean_literal(b) ->
-      let constr, t = got_type context Boolean_type in
-      Boolean_literal(b), constr, t
+      let t = got_type context Boolean_type in
+      Boolean_literal(b), t
    | Integer_literal(i) ->
-      let constr, t = got_type context Integer_type in
-      Integer_literal(i), constr, t
+      let t = got_type context Integer_type in
+      Integer_literal(i), t
    | Var(x) ->
       let t, version = Symbols.Maps.find x context.tc_vars in
-      let constr, t = got_type context t in
-      Var_version(x, version), constr, t
-   | Operation((EQ|NE|LT|GT|LE|GE) as op, lhs, rhs) ->
+      let t = got_type context t in
+      Var_version(x, version), t
+   | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
-      let lhs, lhs_c, lhs_t = type_check_expr operand_context lhs in
-      let rhs, rhs_c, rhs_t = type_check_expr operand_context rhs in
+      let lhs, lhs_t = type_check_expr operand_context lhs in
+      let rhs, rhs_t = type_check_expr operand_context rhs in
       let _ = coerce context lhs_t rhs_t in
-      let constr, result_t = got_type context Boolean_type in
-      (Operation(op, lhs, rhs),
-       Conjunction [lhs_c; rhs_c; constr],
-       result_t)
+      let result_t = got_type context Boolean_type in
+      (Comparison(op, lhs, rhs), result_t)
 
 let rec type_check
    (context: context)
-   (iterm: iterm): constraints * ttype
+   (iterm: iterm): ttype
 = match iterm with
    | Null_term(loc) ->
       got_type context Unit_type
    | Assignment_term(loc, dest, src, tail) ->
-      let src, src_constr, src_type =
+      let src, src_type =
          type_check_expr
             {context with tc_expected = None}
             src
       in
-      let tail_constr, tail_type =
-         type_check
-            {context with
-               tc_vars = Symbols.Maps.add
-                  dest (src_type, new_version dest) context.tc_vars}
-            tail
-      in
-      (Conjunction [src_constr; tail_constr]),
-         tail_type
+      let dest_version = new_version dest in
+      type_check
+         {context with
+            tc_vars = Symbols.Maps.add
+               dest (src_type, dest_version) context.tc_vars;
+            tc_facts =
+               Comparison(EQ, Var_version(dest, dest_version), src)
+                  :: context.tc_facts}
+         tail
    | If_term(loc, condition, true_part, false_part) ->
-      let condition, condition_constr, condition_type =
+      let condition, condition_type =
          type_check_expr
             {context with
                tc_expected = Some Boolean_type}
             condition
       in
-      let true_part_constr, true_part_type =
-         type_check context true_part
+      let true_part_type =
+         type_check
+            {context with
+               tc_facts = condition :: context.tc_facts}
+            true_part
       in
-      let false_part_constr, false_part_type =
-         type_check context false_part
+      let false_part_type =
+         type_check
+            {context with
+               tc_facts = Negation(condition) :: context.tc_facts}
+         false_part
       in
       assert_unit true_part_type;
       assert_unit false_part_type;
@@ -145,37 +209,27 @@ let rec type_check
          | None -> ()
          | Some t -> assert_unit t
       end;
-      (Conjunction [
-            condition_constr;
-            Implication(
-               Operation(EQ, condition, Boolean_literal true),
-               true_part_constr);
-            Implication(
-               Operation(EQ, condition, Boolean_literal false),
-               false_part_constr)
-      ]), Unit_type
+      Unit_type
    | Jump_term(jmp) ->
-      let constraints =
-         Symbols.Maps.fold (fun x (target_t, target_version) constraints ->
-            let source_t, source_version = Symbols.Maps.find x context.tc_vars in
-            prerr_endline ("Jump_term: coercing `"
-               ^ string_of_type source_t ^ "' to `"
-               ^ string_of_type target_t ^ "'.");
-            let coerce_constr, t = coerce context source_t target_t in
-            coerce_constr::constraints
-         ) jmp.jmp_target.bl_in []
-      in
-      Conjunction constraints, Unit_type
+      Symbols.Maps.iter (fun x (target_t, target_version) ->
+         let source_t, source_version = Symbols.Maps.find x context.tc_vars in
+         let t = coerce context source_t target_t in
+         ignore t
+      ) jmp.jmp_target.bl_in;
+      Unit_type
    | Static_assert_term(loc, expr, tail) ->
-      let expr, expr_constr, expr_t =
+      let expr, expr_t =
          type_check_expr
-            {context with
-               tc_expected =
-                  Some Boolean_type}
+            {context with tc_expected = Some Boolean_type}
             expr
       in
-      let constr, t = type_check context tail in
-      Conjunction [expr_constr; expr; constr], t
+      begin try prove context expr
+      with Unsolved_constraint ->
+         Errors.semantic_error loc
+            ("Static assertion could not be proved: `"
+               ^ string_of_expr expr ^ "'.")
+      end;
+      type_check context tail
 
 let merge_types t1 t2 =
    try
@@ -251,13 +305,16 @@ let type_check_blocks
          tc_pass     = Guessing_pass;
          tc_vars     = block.bl_in;
          tc_expected = Some Unit_type;
+         tc_facts    = List.map
+            (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
+            block.bl_preconditions;
       } in
-      let constraints, t =
+      let t =
          type_check
             context
             (unsome block.bl_body)
       in
-      ignore(constraints, t)
+      ignore t
    ) blocks;
    let changed = ref true in
    while !changed do
@@ -281,16 +338,14 @@ let type_check_blocks
          tc_pass     = Checking_pass;
          tc_vars     = block.bl_in;
          tc_expected = Some Unit_type;
+         tc_facts    = List.map
+            (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
+            block.bl_preconditions;
       } in
-      let constraints, t =
+      let t =
          type_check
             context
             (unsome block.bl_body)
       in
-      let constraints = quantify block.bl_in constraints in
-      prerr_endline ("Constraints: "
-         ^ string_of_expr constraints);
-      Solving.solve
-         (Symbols.Maps.map snd block.bl_in)
-         constraints
+      ignore t
    ) blocks

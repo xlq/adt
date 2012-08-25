@@ -127,9 +127,9 @@ expr:
    | INTEGER      { Integer_literal(pos (), $1) }
    | TRUE         { Boolean_literal(pos (), true) }
    | FALSE        { Boolean_literal(pos (), false) }
-   | expr EQ expr { Operation(rhs_end_pos 2, Symbols.EQ, $1, $3) }
-   | expr NE expr { Operation(rhs_end_pos 2, Symbols.NE, $1, $3) }
-   | expr LT expr { Operation(rhs_end_pos 2, Symbols.LT, $1, $3) }
-   | expr GT expr { Operation(rhs_end_pos 2, Symbols.GT, $1, $3) }
-   | expr LE expr { Operation(rhs_end_pos 2, Symbols.LE, $1, $3) }
-   | expr GE expr { Operation(rhs_end_pos 2, Symbols.GE, $1, $3) }
+   | expr EQ expr { Comparison(rhs_end_pos 2, Symbols.EQ, $1, $3) }
+   | expr NE expr { Comparison(rhs_end_pos 2, Symbols.NE, $1, $3) }
+   | expr LT expr { Comparison(rhs_end_pos 2, Symbols.LT, $1, $3) }
+   | expr GT expr { Comparison(rhs_end_pos 2, Symbols.GT, $1, $3) }
+   | expr LE expr { Comparison(rhs_end_pos 2, Symbols.LE, $1, $3) }
+   | expr GE expr { Comparison(rhs_end_pos 2, Symbols.GE, $1, $3) }

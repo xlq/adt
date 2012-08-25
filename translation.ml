@@ -77,8 +77,8 @@ let rec translate_expr
          end
       | Parse_tree.Boolean_literal(loc, b) -> Boolean_literal(b)
       | Parse_tree.Integer_literal(loc, i) -> Integer_literal(i)
-      | Parse_tree.Operation(loc, op, lhs, rhs) ->
-         Operation(op,
+      | Parse_tree.Comparison(loc, op, lhs, rhs) ->
+         Comparison(op,
             translate_expr context lhs,
             translate_expr context rhs)
 

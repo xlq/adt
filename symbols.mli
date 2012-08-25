@@ -2,8 +2,8 @@ open Big_int
 
 type version
 
-type operator =
-   | EQ | NE | LT | GT | LE | GE
+type comparison = | EQ | LT | LE
+                  | NE | GE | GT
  
 type ttype =
    (* Unknown_type means the compiler hasn't decided yet,
@@ -29,10 +29,8 @@ and expr =
    | Integer_literal of big_int
    | Var of symbol
    | Var_version of symbol * version
-   | Operation of operator * expr * expr
-   | For_all of symbol * version * expr
-   | Conjunction of expr list
-   | Implication of expr * expr
+   | Negation of expr
+   | Comparison of comparison * expr * expr
 
 and symbol = {
    sym_id               : int; (* unique identifier *)
