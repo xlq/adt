@@ -46,7 +46,7 @@ rule scan = parse
          try Hashtbl.find keywords id
          with Not_found -> IDENT(id)
       }
-   | ['0'-'9']* as value { INTEGER(big_int_of_string value) }
+   | ['0'-'9']+ as value { INTEGER(big_int_of_string value) }
    | '(' { LPAREN }
    | ')' { RPAREN }
    | '[' { LBRACKET }
