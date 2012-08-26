@@ -8,7 +8,11 @@ type file_location = Lexing.position
 type loc = file_location
 type dotted_name = string list
 
-type subprogram =
+type translation_unit =
+   | Subprogram_unit of subprogram
+   | Package_unit of package
+
+and subprogram =
    {
       sub_location      : loc;
       sub_name          : dotted_name;
@@ -23,6 +27,16 @@ and parameter =
       param_name     : string;
       param_type     : ttype;
    }
+
+and package =
+   {
+      pkg_location      : loc;
+      pkg_name          : dotted_name;
+      pkg_declarations  : declaration list;
+   }
+
+and declaration =
+   | Subprogram of subprogram
 
 and ttype =
    | Named_type of loc * dotted_name

@@ -1,1 +1,1 @@
-val translate : Parse_tree.subprogram -> unit
+val translate : Parse_tree.translation_unit -> unit

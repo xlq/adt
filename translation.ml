@@ -18,7 +18,7 @@ exception Bail_out
 
 type context =
    {
-      (* Function that's being translated. *)
+      (* Entity that's being translated. *)
       ctx_scope      : symbol;
       (* Block to "jump" to after current block. *)
       ctx_after      : block option;
@@ -28,6 +28,8 @@ type context =
 
 type state =
    {
+      mutable st_subprograms:
+         (symbol * Parse_tree.subprogram) list;
       mutable st_blocks: block list;
    }
 
@@ -221,24 +223,31 @@ and translate_block
    make_block state context statement
       (fun _ -> translate_statement state context statement)
 
-let translate (sub: Parse_tree.subprogram): unit =
-   let state =
-      {
-         st_blocks = [];
-      }
-   in
+let parameters_of_subprogram sym =
+   List.fold_left (fun result child ->
+      match child.sym_info with
+         | Parameter_sym(t) ->
+            Symbols.Maps.add child t result
+         | _ ->
+            result
+      ) Symbols.Maps.empty sym.sym_children
+
+let translate_subprogram_prototype state context sub =
    match sub.Parse_tree.sub_name with [name] ->
-   let subprogram_sym = new_symbol root_symbol name Subprogram_sym in
-   let context =
-      {
-         ctx_scope      = subprogram_sym;
-         ctx_after      = None;
-         ctx_last_loc   = sub.Parse_tree.sub_location;
-      }
+   let subprogram_info = {
+      sub_preconditions = [];
+   } in
+   let subprogram_sym = new_symbol context.ctx_scope name
+      (Subprogram_sym subprogram_info)
    in
+   let context = {context with
+      ctx_scope = subprogram_sym;
+      ctx_after = None;
+      ctx_last_loc = sub.Parse_tree.sub_location;
+   } in
    (* Translate parameters. *)
-   let parameters = List.fold_left
-      (fun parameters param ->
+   List.iter
+      (fun param ->
          try
             match Symbols.find_in
                context.ctx_scope
@@ -259,30 +268,79 @@ let translate (sub: Parse_tree.subprogram): unit =
                         context 
                         param.Parse_tree.param_type
                      in
-                     sym.sym_info <- Parameter_sym(t);
-                     Symbols.Maps.add sym t parameters
-            with Bail_out -> parameters
-         ) Symbols.Maps.empty sub.Parse_tree.sub_parameters
-   in
+                     sym.sym_info <- Parameter_sym(t)
+            with Bail_out -> ()
+         ) sub.Parse_tree.sub_parameters;
    (* Translate preconditions. *)
-   let preconditions =
+   subprogram_info.sub_preconditions <-
       List.map
          (translate_expr context)
-         sub.Parse_tree.sub_preconditions
+         sub.Parse_tree.sub_preconditions;
+   (* Translate the body later. *)
+   state.st_subprograms <-
+      (subprogram_sym, sub) :: state.st_subprograms
+
+let translate_subprogram_body state subprogram_sym sub =
+   let subprogram_info = match subprogram_sym.sym_info with
+      | Subprogram_sym(info) -> info
    in
-   (* Translate subprogram body. *)
+   let parameters = parameters_of_subprogram subprogram_sym in
+   let context = {
+      ctx_scope = subprogram_sym;
+      ctx_after = None;
+      ctx_last_loc = sub.Parse_tree.sub_location;
+   } in
+   assert (match state.st_blocks with [] -> true | _ -> false);
    let entry_point =
       translate_block state context
          sub.Parse_tree.sub_body
    in
-
-   entry_point.bl_preconditions <- preconditions;
-
+   entry_point.bl_preconditions <- subprogram_info.sub_preconditions;
    calculate_free_names state.st_blocks;
-   let f = new_formatter () in
-   dump_blocks f state.st_blocks;
-   prerr_endline (get_fmt_str f);
    Type_checking.type_check_blocks
       state.st_blocks
       entry_point
       parameters
+
+let translate_declarations state context declarations =
+   List.iter (function
+      | Parse_tree.Subprogram(sub) ->
+         translate_subprogram_prototype state context sub
+   ) declarations
+
+let finish_translation state =
+   let subs = state.st_subprograms in
+   state.st_subprograms <- [];
+   List.iter (fun (sym, sub) ->
+      translate_subprogram_body state sym sub) subs
+
+let translate_package state pkg =
+   match pkg.Parse_tree.pkg_name with [name] ->
+   let package_sym = new_symbol root_symbol name Package_sym in
+   let context =
+      {
+         ctx_scope      = package_sym;
+         ctx_after      = None;
+         ctx_last_loc   = pkg.Parse_tree.pkg_location;
+      }
+   in
+   translate_declarations state context
+      pkg.Parse_tree.pkg_declarations;
+   finish_translation state
+
+let translate translation_unit =
+   let state = {
+      st_subprograms = [];
+      st_blocks = [];
+   } in
+   match translation_unit with
+      | Parse_tree.Subprogram_unit sub ->
+         let context = {
+            ctx_scope      = root_symbol;
+            ctx_after      = None;
+            ctx_last_loc   = sub.Parse_tree.sub_location
+         } in
+         translate_subprogram_prototype state context sub;
+         finish_translation state
+      | Parse_tree.Package_unit pkg ->
+         translate_package state pkg

@@ -45,9 +45,13 @@ and symbol = {
 and symbol_info =
    | Unfinished_sym (* symbol_info not yet set *)
    | Package_sym
-   | Subprogram_sym
+   | Subprogram_sym of subprogram_info
    | Variable_sym
    | Parameter_sym of ttype
+
+and subprogram_info = {
+   mutable sub_preconditions : expr list;
+}
 
 module Ordered : Map.OrderedType with type t = symbol
 module Maps    : Map.S with type key = symbol

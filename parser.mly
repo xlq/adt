@@ -23,7 +23,7 @@ let check_end (pos1, name1) (pos2, name2) =
 %token <Big_int.big_int> INTEGER
 
 /* Keywords */
-%token PROCEDURE NULL END AND OR VAR IS IF THEN ELSE ELSIF
+%token PACKAGE PROCEDURE NULL END AND OR VAR IS IF THEN ELSE ELSIF
 %token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE
 %token INSPECT_TYPE STATIC_ASSERT
 
@@ -37,10 +37,14 @@ let check_end (pos1, name1) (pos2, name2) =
 
 %nonassoc EQ NE LT LE GT GE
 
-%start subprogram
-%type <Parse_tree.subprogram> subprogram
+%start translation_unit
+%type <Parse_tree.translation_unit> translation_unit
 
 %%
+
+translation_unit:
+   | subprogram { Subprogram_unit $1 }
+   | package { Package_unit $1 }
 
 dotted_name:
    | IDENT { [$1] }
@@ -48,6 +52,26 @@ dotted_name:
 
 ttype:
    | dotted_name { Named_type(pos(), $1) }
+
+package:
+   | PACKAGE dotted_name IS
+         declarations
+     END dotted_name SEMICOLON
+      {
+         check_end (rhs_start_pos 2, $2) (rhs_start_pos 6, $6);
+         {
+            pkg_location      = pos ();
+            pkg_name          = $2;
+            pkg_declarations  = $4;
+         }
+      }
+
+declarations:
+   | /* empty */ { [] }
+   | declaration declarations { $1 :: $2 }
+
+declaration:
+   | subprogram { Subprogram $1 }
 
 subprogram:
    | PROCEDURE dotted_name opt_parameters IS

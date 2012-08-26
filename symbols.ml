@@ -38,9 +38,13 @@ and symbol = {
 and symbol_info =
    | Unfinished_sym
    | Package_sym
-   | Subprogram_sym
+   | Subprogram_sym of subprogram_info
    | Variable_sym
    | Parameter_sym of ttype
+
+and subprogram_info = {
+   mutable sub_preconditions : expr list;
+}
 
 let last_sym_id = ref 0
 
@@ -102,7 +106,7 @@ let rec string_of_type = function
 let describe_symbol sym =
    (match sym.sym_info with
       | Package_sym     -> "package"
-      | Subprogram_sym  -> "subprogram"
+      | Subprogram_sym _-> "subprogram"
       | Variable_sym    -> "variable"
       | Parameter_sym _ -> "parameter"
    ) ^ " `" ^ full_name sym ^ "'"

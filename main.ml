@@ -20,5 +20,5 @@ let _ =
       Lexing.pos_fname = filename
    };
 
-   let sub = try_parse Parser.subprogram lexbuf in
-   Translation.translate sub
+   let translation_unit = try_parse Parser.translation_unit lexbuf in
+   Translation.translate translation_unit

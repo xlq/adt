@@ -12,6 +12,7 @@ let keywords = create_hashtable 10 [
    "and",         AND;
    "or",          OR;
    "end",         END;
+   "package",     PACKAGE;
    "procedure",   PROCEDURE;
    "null",        NULL;
    "var",         VAR;
