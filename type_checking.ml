@@ -21,6 +21,11 @@ type context = {
    tc_facts    : expr list;
 }
 
+type state = {
+   (* List of unsolved constraints. *)
+   mutable ts_unsolved  : (Parse_tree.file_location * expr) list;
+}
+
 exception Type_error
 exception Unresolved_unknown
 exception Unsolved_constraint
@@ -87,18 +92,13 @@ let rec expressions_match m n =
          false
 
 let prove
+   (state: state)
    (context: context)
+   (loc: Parse_tree.file_location)
    (e: expr): unit
 =
    let facts = List.map normalise context.tc_facts in
    let e = normalise e in
-   (*
-   prerr_endline ("Must prove "
-      ^ string_of_expr e
-      ^ " under the assumptions: "
-      ^ String.concat " and "
-         (List.map string_of_expr facts));
-   *)
    if List.exists (expressions_match e) facts then
       (* Trivial case: we already know e is true. *)
       ()
@@ -115,7 +115,11 @@ let prove
          in
          let inequalities = linear_facts @ (List.map Fm_solver.negate linear_e) in
          (* We must now prove that the inequalities are not satisfiable. *)
-         try Fm_solver.solve inequalities
+         try
+            Fm_solver.solve inequalities;
+            (* Solving succeeded: the inequalities were satisfiable.
+               The original constraint was not proved. *)
+            state.ts_unsolved <- (loc, e) :: state.ts_unsolved
          with Fm_solver.Contradiction -> ()
 
 let rec coerce context t1 t2: ttype =
@@ -181,6 +185,7 @@ let rec type_check_expr
       (Comparison(op, lhs, rhs), result_t)
 
 let rec type_check
+   (state: state)
    (context: context)
    (iterm: iterm): ttype
 = match iterm with
@@ -194,6 +199,7 @@ let rec type_check
       in
       let dest_version = new_version dest in
       type_check
+         state
          {context with
             tc_vars = Symbols.Maps.add
                dest (src_type, dest_version) context.tc_vars;
@@ -210,12 +216,14 @@ let rec type_check
       in
       let true_part_type =
          type_check
+            state
             {context with
                tc_facts = condition :: context.tc_facts}
             true_part
       in
       let false_part_type =
          type_check
+            state
             {context with
                tc_facts = Negation(condition) :: context.tc_facts}
          false_part
@@ -240,13 +248,8 @@ let rec type_check
             {context with tc_expected = Some Boolean_type}
             expr
       in
-      begin try prove context expr
-      with Unsolved_constraint ->
-         Errors.semantic_error loc
-            ("Static assertion could not be proved: `"
-               ^ string_of_expr expr ^ "'.")
-      end;
-      type_check context tail
+      prove state context loc expr;
+      type_check state context tail
 
 let merge_types t1 t2 =
    try
@@ -316,53 +319,53 @@ let type_check_blocks
          ) block.bl_free initial_vars
    ) blocks;
 
-   (* First pass: guess unknowns. *)
-   List.iter (fun block ->
-      let context = {
-         tc_pass     = Guessing_pass;
-         tc_vars     = block.bl_in;
-         tc_expected = Some Unit_type;
-         tc_facts    = List.map
-            (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
-            block.bl_preconditions;
-      } in
-      let t =
-         type_check
-            context
-            (unsome block.bl_body)
-      in
-      ignore t
-   ) blocks;
-   let changed = ref true in
-   while !changed do
-      prerr_endline "Start of iteration.";
-      changed := false;
+   let first_pass = ref true in
+   let finished = ref false in
+   while not !finished do
+      finished := true;
       List.iter (fun block ->
-         block.bl_in <-
-            resolve_unknowns changed block.bl_in
+         let state = {
+            ts_unsolved = [];
+         } in
+         let context = {
+            tc_pass = if !first_pass then Guessing_pass else Checking_pass;
+            tc_vars = block.bl_in;
+            tc_expected = Some Unit_type;
+            tc_facts = List.map
+               (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
+               block.bl_preconditions;
+         } in
+         let t = type_check state context (unsome block.bl_body) in
+         ignore t;
+         if !first_pass then begin
+            first_pass := false;
+            finished := false;
+            let changed = ref true in
+            while !changed do
+               prerr_endline "Unknowns resolution iteration...";
+               changed := false;
+               List.iter (fun block ->
+                  block.bl_in <-
+                     resolve_unknowns changed block.bl_in
+               ) blocks
+            done
+         end else begin
+            List.iter (fun (loc, constr) ->
+               if block == entry_point then begin
+                  Errors.semantic_error loc
+                     ("Cannot prove `"
+                        ^ string_of_expr constr ^ "'.")
+               end else begin
+                  block.bl_preconditions <- constr :: block.bl_preconditions;
+                  finished := false
+               end
+            ) state.ts_unsolved
+         end
       ) blocks
    done;
 
+   prerr_endline "";
    prerr_endline "Dumping blocks with computed types...";
    let f = Formatting.new_formatter () in
    dump_blocks f blocks;
-   prerr_endline (Formatting.get_fmt_str f);
-
-   (* Second pass: check types. *)
-   prerr_endline "Generating constraints.";
-   List.iter (fun block ->
-      let context = {
-         tc_pass     = Checking_pass;
-         tc_vars     = block.bl_in;
-         tc_expected = Some Unit_type;
-         tc_facts    = List.map
-            (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
-            block.bl_preconditions;
-      } in
-      let t =
-         type_check
-            context
-            (unsome block.bl_body)
-      in
-      ignore t
-   ) blocks
+   prerr_endline (Formatting.get_fmt_str f)

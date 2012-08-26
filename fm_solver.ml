@@ -237,18 +237,10 @@ let eliminate x inequalities =
 let solve inequalities =
    dump "Solving linear inequalities:" inequalities;
    let system = ref inequalities in
-   let changed = ref true in
-   while !changed do
-      changed := false;
-      let vars = free_ineqs !system in
-      List.iter (fun x ->
-         match eliminate x !system with
-            | None -> ()
-            | Some system' ->
-               begin
-                  changed := true;
-                  system := system'
-               end
-      ) vars
-   done;
+   let vars = free_ineqs !system in
+   List.iter (fun x ->
+      match eliminate x !system with
+         | None -> ()
+         | Some system' -> system := system'
+   ) vars;
    dump "Result:" !system
