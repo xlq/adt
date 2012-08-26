@@ -173,9 +173,11 @@ let rec translate_statement
          If_term(loc,
             translate_expr context condition,
             translate_statement state
-               {context with ctx_after = Some cont} true_part,
+               {context with ctx_after = Some cont;
+                             ctx_last_loc = loc} true_part,
             translate_statement state
-               {context with ctx_after = Some cont} false_part)
+               {context with ctx_after = Some cont;
+                             ctx_last_loc = loc} false_part)
       | Parse_tree.While_loop(loc, condition, body, cont) ->
          (* XXX: If we're at the start of a block, make_block will do nothing! *)
          let condition_block =

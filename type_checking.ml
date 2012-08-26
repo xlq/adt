@@ -50,6 +50,17 @@ let rec bind_versions
    | Comparison(op, lhs, rhs) ->
       Comparison(op, r lhs, r rhs)
 
+(* Substitute a variable with a term, in the given expression. *)
+let rec subst (x_sym, x_version) replacement expr =
+   let r = subst (x_sym, x_version) replacement in
+   match expr with
+      | Boolean_literal _ | Integer_literal _ -> expr
+      | Var_version(x,v) when (x_sym == x && x_version = v) ->
+         replacement
+      | Var_version _ -> expr
+      | Negation(e) -> Negation(r e)
+      | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
+
 let negate = function
    | Boolean_literal(b) -> Some(Boolean_literal(not b))
    | Integer_literal _ | Var _ | Var_version _ -> None
@@ -95,10 +106,10 @@ let prove
    (state: state)
    (context: context)
    (loc: Parse_tree.file_location)
-   (e: expr): unit
+   (to_prove: expr): unit
 =
    let facts = List.map normalise context.tc_facts in
-   let e = normalise e in
+   let e = normalise to_prove in
    if List.exists (expressions_match e) facts then
       (* Trivial case: we already know e is true. *)
       ()
@@ -119,7 +130,7 @@ let prove
             Fm_solver.solve inequalities;
             (* Solving succeeded: the inequalities were satisfiable.
                The original constraint was not proved. *)
-            state.ts_unsolved <- (loc, e) :: state.ts_unsolved
+            state.ts_unsolved <- (loc, to_prove) :: state.ts_unsolved
          with Fm_solver.Contradiction -> ()
 
 let rec coerce context t1 t2: ttype =
@@ -236,11 +247,17 @@ let rec type_check
       end;
       Unit_type
    | Jump_term(jmp) ->
+      let preconditions = ref jmp.jmp_target.bl_preconditions in
       Symbols.Maps.iter (fun x (target_t, target_version) ->
          let source_t, source_version = Symbols.Maps.find x context.tc_vars in
          let t = coerce context source_t target_t in
-         ignore t
+         ignore t;
+         preconditions :=
+            List.map
+               (subst (x, target_version) (Var_version(x, source_version)))
+               !preconditions
       ) jmp.jmp_target.bl_in;
+      List.iter (prove state context jmp.jmp_location) !preconditions;
       Unit_type
    | Static_assert_term(loc, expr, tail) ->
       let expr, expr_t =
