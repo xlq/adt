@@ -274,8 +274,15 @@ let translate_subprogram_prototype state context sub =
       sub_parameters = [];
       sub_preconditions = [];
    } in
-   let subprogram_sym = new_symbol context.ctx_scope name
-      (Subprogram_sym subprogram_info)
+   let subprogram_sym =
+      try
+         new_symbol context.ctx_scope name
+            (Subprogram_sym subprogram_info)
+      with Already_defined sym ->
+         Errors.semantic_error sub.Parse_tree.sub_location
+            ("`" ^ name ^ "' already defined as "
+               ^ describe_symbol sym ^ ".");
+         raise Bail_out
    in
    let context = {context with
       ctx_scope = subprogram_sym;

@@ -54,6 +54,8 @@ and subprogram_info = {
    mutable sub_preconditions : expr list;
 }
 
+exception Already_defined of symbol
+
 module Ordered : Map.OrderedType with type t = symbol
 module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol

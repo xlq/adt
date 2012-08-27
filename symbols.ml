@@ -47,6 +47,8 @@ and subprogram_info = {
    mutable sub_preconditions : expr list;
 }
 
+exception Already_defined of symbol
+
 let last_sym_id = ref 0
 
 module Ordered = struct
@@ -120,9 +122,11 @@ let find_in scope name =
    with Not_found -> None
 
 let new_symbol scope name info =
-   assert (match find_in scope name with
-      | None -> true
-      | Some _ -> false);
+   begin match find_in scope name with
+      | None -> ()
+      | Some sym ->
+         raise (Already_defined sym)
+   end;
    incr last_sym_id;
    let new_sym = {
       sym_id            = !last_sym_id;
