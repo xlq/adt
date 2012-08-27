@@ -68,13 +68,14 @@ let root_symbol = {
    sym_last_version  = 0;
 }
 
+let dotted_name sym =
+   let rec loop result sym =
+      if sym == root_symbol then result
+      else loop (sym.sym_name :: result) (unsome sym.sym_parent)
+   in loop [] sym
+
 let rec full_name sym =
-   (match sym.sym_parent with
-      | None -> ""
-      | Some parent when parent == root_symbol -> ""
-      | Some parent ->
-         full_name parent ^ ".")
-   ^ sym.sym_name
+   String.concat "." (dotted_name sym)
 
 let full_name_with_version sym version =
    full_name sym ^ "#" ^ string_of_int version

@@ -61,6 +61,7 @@ module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol
 
 val root_symbol : symbol
+val dotted_name : symbol -> string list
 val full_name : symbol -> string
 val full_name_with_version : symbol -> version -> string
 val string_of_type : ttype -> string
