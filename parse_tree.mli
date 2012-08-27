@@ -54,8 +54,12 @@ and statement =
    | While_loop of loc * expr (* condition *)
                        * statement  (* body *)
                        * statement  (* continuation *)
+   | Subprogram_call of loc * dotted_name * arguments * statement
    | Inspect_type of loc * dotted_name * statement
    | Static_assert of loc * expr * statement
+
+and arguments = expr list             (* positional *)
+              * (string * expr) list  (* named *)
 
 and expr =
    | Name of loc * dotted_name

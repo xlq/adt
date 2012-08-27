@@ -15,6 +15,7 @@ type iterm =
    | Assignment_term of loc * symbol * expr * iterm
    | If_term of loc * expr * iterm * iterm
    | Jump_term of jump_info
+   | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
 
@@ -23,6 +24,13 @@ and jump_info =
       jmp_location      : loc;
       jmp_target        : block;
       mutable jmp_bound : Symbols.Sets.t;
+   }
+
+and call_info =
+   {
+      call_location   : loc;
+      call_target     : symbol;
+      call_arguments  : expr list * (string * expr) list;
    }
 
 and block =
@@ -49,6 +57,15 @@ let rec dump_term (f: formatter) = function
       dump_term f b; undent f;
    | Jump_term {jmp_target=bl} ->
       puts f ("tail block" ^ string_of_int bl.bl_id)
+   | Call_term(call, tail) ->
+      puts f ("call "
+         ^ full_name call.call_target
+         ^ " (" ^ String.concat ", "
+            (List.map string_of_expr (fst call.call_arguments)
+               @ List.map (fun (_,arg) -> string_of_expr arg) (snd call.call_arguments))
+         ^ ");");
+      break f;
+      dump_term f tail
    | Inspect_type_term(_,_,tail) ->
       dump_term f tail
    | Static_assert_term(_,expr,tail) ->
@@ -110,6 +127,17 @@ let calculate_free_names (blocks: block list): unit =
             jump.jmp_bound <- bound;
             jumps := (block, jump) :: !jumps;
             free
+         | Call_term(call, tail) ->
+            let (pos_args, named_args) = call.call_arguments in
+            let free =
+               List.fold_left (fun free arg -> esearch free bound arg)
+                  free pos_args
+            in
+            let free =
+               List.fold_left (fun free (_, arg) -> esearch free bound arg)
+                  free named_args
+            in
+            search free bound tail
          | Static_assert_term(loc, expr, tail) ->
             search
                (esearch free bound expr)

@@ -50,6 +50,7 @@ and symbol_info =
    | Parameter_sym of ttype
 
 and subprogram_info = {
+   mutable sub_parameters : symbol list;
    mutable sub_preconditions : expr list;
 }
 

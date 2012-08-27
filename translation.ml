@@ -14,6 +14,9 @@ open Formatting
 open Big_int
 open Misc
 
+(* This is raised when translation cannot proceed due to an error.
+   A compiler error is always produced before raising Bail_out,
+   so catching it silently and continuing translation is OK. *)
 exception Bail_out
 
 type context =
@@ -101,7 +104,8 @@ let translate_lvalue
          end
 
 (* Find the block for the given source statement.
-   This is so that statements only get translated once each. *)
+   This is so that statements only get translated once each.
+   XXX: I don't think a statement would get translated twice anyway. *)
 let find_block (state: state) (statement: Parse_tree.statement): block option =
    let rec search = function
       | [] -> None
@@ -199,6 +203,35 @@ let rec translate_statement
          in
          (*condition_block.bl_free <- !annotations;*)
          make_jump loc condition_block
+      | Parse_tree.Subprogram_call(loc, [name], (positional_args, named_args), tail) ->
+         begin match Symbols.find context.ctx_scope name with
+         | None ->
+            Errors.semantic_error loc ("`" ^ name ^ "' is undefined.");
+            raise Bail_out
+         | Some subprogram_sym ->
+            begin match subprogram_sym.sym_info with
+            | Subprogram_sym(subprogram_info) ->
+               let positional_args = List.map
+                  (translate_expr context)
+                  positional_args
+               in
+               let named_args = List.map
+                  (fun (name, arg) -> (name, translate_expr context arg))
+                  named_args
+               in
+               Call_term(
+                  {call_location    = loc;
+                   call_target      = subprogram_sym;
+                   call_arguments   = (positional_args, named_args)},
+                  translate_statement state context tail)
+            | _ ->
+               Errors.semantic_error loc
+                  ("Subprogram expected but "
+                     ^ describe_symbol subprogram_sym
+                     ^ " found.");
+               raise Bail_out
+            end
+         end
       | Parse_tree.Inspect_type(loc,[x],tail) ->
          let sym = Symbols.find_variable context.ctx_scope x in
          begin match sym.sym_info with
@@ -223,18 +256,22 @@ and translate_block
    make_block state context statement
       (fun _ -> translate_statement state context statement)
 
+(* Make a sym -> type map of a subprogram's parameters. *)
 let parameters_of_subprogram sym =
-   List.fold_left (fun result child ->
-      match child.sym_info with
-         | Parameter_sym(t) ->
-            Symbols.Maps.add child t result
-         | _ ->
-            result
-      ) Symbols.Maps.empty sym.sym_children
+   match sym.sym_info with
+   | Subprogram_sym(subprogram_info) ->
+      List.fold_left (fun result param ->
+         match param.sym_info with
+            | Parameter_sym(t) ->
+               Symbols.Maps.add param t result
+            | _ ->
+               result
+         ) Symbols.Maps.empty subprogram_info.sub_parameters
 
 let translate_subprogram_prototype state context sub =
    match sub.Parse_tree.sub_name with [name] ->
    let subprogram_info = {
+      sub_parameters = [];
       sub_preconditions = [];
    } in
    let subprogram_sym = new_symbol context.ctx_scope name
@@ -246,31 +283,33 @@ let translate_subprogram_prototype state context sub =
       ctx_last_loc = sub.Parse_tree.sub_location;
    } in
    (* Translate parameters. *)
-   List.iter
-      (fun param ->
-         try
-            match Symbols.find_in
-               context.ctx_scope
-               param.Parse_tree.param_name
-            with
-                  | Some _ ->
-                     Errors.semantic_error sub.Parse_tree.sub_location
-                        ("Parameter `" ^ param.Parse_tree.param_name
-                           ^ "' defined twice.");
-                     raise Bail_out
-                  | None ->
-                     let sym = new_symbol
-                        subprogram_sym
-                        param.Parse_tree.param_name
-                        Unfinished_sym
-                     in
-                     let t = translate_type
-                        context 
-                        param.Parse_tree.param_type
-                     in
-                     sym.sym_info <- Parameter_sym(t)
-            with Bail_out -> ()
-         ) sub.Parse_tree.sub_parameters;
+   subprogram_info.sub_parameters <-
+      List.fold_right
+         (fun param parameters ->
+            try
+               match Symbols.find_in
+                  context.ctx_scope
+                  param.Parse_tree.param_name
+               with
+                     | Some _ ->
+                        Errors.semantic_error sub.Parse_tree.sub_location
+                           ("Parameter `" ^ param.Parse_tree.param_name
+                              ^ "' defined twice.");
+                        raise Bail_out
+                     | None ->
+                        let sym = new_symbol
+                           subprogram_sym
+                           param.Parse_tree.param_name
+                           Unfinished_sym
+                        in
+                        let t = translate_type
+                           context 
+                           param.Parse_tree.param_type
+                        in
+                        sym.sym_info <- Parameter_sym(t);
+                        sym :: parameters
+               with Bail_out -> parameters
+            ) sub.Parse_tree.sub_parameters [];
    (* Translate preconditions. *)
    subprogram_info.sub_preconditions <-
       List.map
@@ -300,19 +339,24 @@ let translate_subprogram_body state subprogram_sym sub =
    Type_checking.type_check_blocks
       state.st_blocks
       entry_point
-      parameters
+      parameters;
+   state.st_blocks <- []
 
 let translate_declarations state context declarations =
-   List.iter (function
-      | Parse_tree.Subprogram(sub) ->
-         translate_subprogram_prototype state context sub
+   List.iter (fun declaration ->
+      try
+         match declaration with
+            | Parse_tree.Subprogram(sub) ->
+               translate_subprogram_prototype state context sub
+      with Bail_out -> ()
    ) declarations
 
 let finish_translation state =
    let subs = state.st_subprograms in
    state.st_subprograms <- [];
    List.iter (fun (sym, sub) ->
-      translate_subprogram_body state sym sub) subs
+      try translate_subprogram_body state sym sub
+      with Bail_out -> ()) subs
 
 let translate_package state pkg =
    match pkg.Parse_tree.pkg_name with [name] ->

@@ -119,6 +119,7 @@ ne_statements:
       { Assignment(pos (), $1, $3, $5) }
    | if_statement { $1 }
    | while_loop { $1 }
+   | subprogram_call { $1 }
    | INSPECT_TYPE dotted_name SEMICOLON statements
       { Inspect_type(pos (), $2, $4) }
    | STATIC_ASSERT expr SEMICOLON statements
@@ -145,6 +146,28 @@ while_loop:
          ne_statements
      END LOOP SEMICOLON statements
       { While_loop(pos (), $2, $4, $8) }
+
+subprogram_call:
+   | dotted_name arguments SEMICOLON statements
+      { Subprogram_call(pos (), $1, $2, $4) }
+
+arguments:
+   | /* empty */ { ([], []) }
+   | LPAREN arguments_inner RPAREN { $2 }
+
+arguments_inner:
+   | expr
+      { ([$1], []) }
+   | expr COMMA arguments_inner
+      { ($1::fst $3, snd $3) }
+   | named_arguments
+      { ([], $1) }
+
+named_arguments:
+   | IDENT RARROW expr
+      { [($1, $3)] }
+   | IDENT RARROW expr COMMA named_arguments
+      { ($1, $3) :: $5 }
 
 expr:
    | dotted_name  { Name(pos (), $1) }

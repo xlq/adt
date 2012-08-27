@@ -51,8 +51,19 @@ let rec bind_versions
       Comparison(op, r lhs, r rhs)
 
 (* Substitute a variable with a term, in the given expression. *)
-let rec subst (x_sym, x_version) replacement expr =
-   let r = subst (x_sym, x_version) replacement in
+let rec subst x_sym replacement expr =
+   let r = subst x_sym replacement in
+   match expr with
+      | Boolean_literal _ | Integer_literal _ -> expr
+      | Var(x) when (x_sym == x) ->
+         replacement
+      | Var _ -> expr
+      | Negation(e) -> Negation(r e)
+      | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
+
+(* Same as subst but specifies a variable version. *)
+let rec substv (x_sym, x_version) replacement expr =
+   let r = substv (x_sym, x_version) replacement in
    match expr with
       | Boolean_literal _ | Integer_literal _ -> expr
       | Var_version(x,v) when (x_sym == x && x_version = v) ->
@@ -254,11 +265,61 @@ let rec type_check
          ignore t;
          preconditions :=
             List.map
-               (subst (x, target_version) (Var_version(x, source_version)))
+               (substv (x, target_version) (Var_version(x, source_version)))
                !preconditions
       ) jmp.jmp_target.bl_in;
       List.iter (prove state context jmp.jmp_location) !preconditions;
       Unit_type
+   | Call_term(call, tail) ->
+      begin match call.call_target.sym_info with
+      | Subprogram_sym(subprogram_info) ->
+         let preconditions = ref subprogram_info.sub_preconditions in
+         let parameters = ref subprogram_info.sub_parameters in
+         let positional_args, named_args = call.call_arguments in
+         let got_argument param arg =
+            match param.sym_info with Parameter_sym(param_type) ->
+            let arg, arg_t = type_check_expr
+               {context with tc_expected = Some param_type} arg
+            in
+            ignore arg_t;
+            preconditions := List.map (subst param arg) !preconditions
+         in
+         (* Bind positional arguments. *)
+         List.iter (fun arg ->
+            match !parameters with
+            | [] ->
+               Errors.semantic_error call.call_location
+                  ("Too many arguments to "
+                     ^ describe_symbol call.call_target ^ ".");
+            | param::remaining_params ->
+               parameters := remaining_params;
+               got_argument param arg
+         ) positional_args;
+         (* Bind named arguments. *)
+         List.iter (fun (name, arg) ->
+            let rec search = function
+            | [] ->
+               if List.exists
+                  (fun param -> param.sym_name = name)
+                  subprogram_info.sub_parameters
+               then begin
+                  Errors.semantic_error call.call_location
+                     ("Parameter `" ^ name ^ "' specified twice.")
+               end else begin
+                  Errors.semantic_error call.call_location
+                     ("Parameter `" ^ name ^ "' doesn't exist in call to "
+                        ^ describe_symbol call.call_target ^ ".")
+               end;
+               []
+            | param::rest when param.sym_name = name ->
+               got_argument param arg;
+               rest
+            | param::rest -> param :: search rest
+            in parameters := search !parameters
+         ) named_args;
+         List.iter (prove state context call.call_location) !preconditions;
+         Unit_type
+      end
    | Static_assert_term(loc, expr, tail) ->
       let expr, expr_t =
          type_check_expr

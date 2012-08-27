@@ -22,6 +22,7 @@ type iterm =
                     * iterm (* true part *)
                     * iterm (* false part *)
    | Jump_term of jump_info
+   | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
 
@@ -34,6 +35,13 @@ and jump_info =
       (* Variables bound in this jump.
          Used during liveness analysis. *)
       mutable jmp_bound : Symbols.Sets.t;
+   }
+
+and call_info =
+   {
+      call_location   : loc;
+      call_target     : symbol;
+      call_arguments  : expr list * (string * expr) list;
    }
 
 and block =

@@ -43,6 +43,7 @@ and symbol_info =
    | Parameter_sym of ttype
 
 and subprogram_info = {
+   mutable sub_parameters : symbol list;
    mutable sub_preconditions : expr list;
 }
 
@@ -138,7 +139,15 @@ let new_version sym =
    sym.sym_last_version <- sym.sym_last_version + 1;
    sym.sym_last_version
 
-let find = find_in
+let find scope name =
+   let rec try_scope scope =
+      match find_in scope name with
+         | Some sym -> Some sym
+         | None ->
+            match scope.sym_parent with
+               | None -> None
+               | Some parent -> try_scope parent
+   in try_scope scope
 
 let find_variable scope name =
    match find scope name with
