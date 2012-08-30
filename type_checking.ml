@@ -13,7 +13,7 @@ type context = {
    (* The current pass. *)
    tc_pass     : pass;
    (* The types and current versions of variables. *)
-   tc_vars     : (ttype * version) Symbols.Maps.t;
+   tc_vars     : (ttype * symbol_v) Symbols.Maps.t;
    (* The type that's expected of the term or expression being
       typed under this context. *)
    tc_expected : ttype option;
@@ -38,15 +38,15 @@ let assert_unit t =
 (* Get versions for the variables in the given expression.
    I.e. change all Var to Var_version. *)
 let rec bind_versions
-   (get_version : symbol -> version)
+   (get_version : symbol -> symbol_v)
    (e: expr): expr
 =
    let r = bind_versions get_version in
    match e with
    | Boolean_literal _
    | Integer_literal _
-   | Var_version _ -> e
-   | Var(x) -> Var_version(x, get_version x)
+   | Var_v _ -> e
+   | Var(x) -> Var_v(get_version x)
    | Comparison(op, lhs, rhs) ->
       Comparison(op, r lhs, r rhs)
 
@@ -62,19 +62,18 @@ let rec subst x_sym replacement expr =
       | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
 
 (* Same as subst but specifies a variable version. *)
-let rec substv (x_sym, x_version) replacement expr =
-   let r = substv (x_sym, x_version) replacement in
+let rec substv x replacement expr =
+   let r = substv x replacement in
    match expr with
       | Boolean_literal _ | Integer_literal _ -> expr
-      | Var_version(x,v) when (x_sym == x && x_version = v) ->
-         replacement
-      | Var_version _ -> expr
+      | Var_v(x') when x == x' -> replacement
+      | Var_v _ -> expr
       | Negation(e) -> Negation(r e)
       | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
 
 let negate = function
    | Boolean_literal(b) -> Some(Boolean_literal(not b))
-   | Integer_literal _ | Var _ | Var_version _ -> None
+   | Integer_literal _ | Var _ | Var_v _ -> None
    | Comparison(op, lhs, rhs) ->
       Some(Comparison(
          (match op with
@@ -86,7 +85,7 @@ let negate = function
 let rec normalise (e: expr) =
    match e with
       | Boolean_literal _ | Integer_literal _
-      | Var _ | Var_version _ -> e
+      | Var _ | Var_v _ -> e
       | Negation(e) ->
          begin match negate e with
             | Some e' -> normalise e'
@@ -100,15 +99,14 @@ let rec expressions_match m n =
    match m, n with
       | Boolean_literal(b), Boolean_literal(b') -> b = b'
       | Integer_literal(i), Integer_literal(i') -> eq_big_int i i'
-      | Var_version(x,v), Var_version(x',v') ->
-         (x == x') && (v = v')
+      | Var_v(x), Var_v(x') -> x == x'
       | Negation(x), Negation(x') -> expressions_match x x'
       | Comparison(op, lhs, rhs), Comparison(op', lhs', rhs') ->
          (op = op') && (expressions_match lhs lhs')
                     && (expressions_match rhs rhs')
       | Boolean_literal _, _ | _, Boolean_literal _
       | Integer_literal _, _ | _, Integer_literal _
-      | Var_version _, _ | _, Var_version _
+      | Var_v _, _ | _, Var_v _
       | Negation _, _ | _, Negation _
       | Comparison _, _ | _, Comparison _ ->
          false
@@ -195,9 +193,9 @@ let rec type_check_expr
       let t = got_type context Integer_type in
       Integer_literal(i), t
    | Var(x) ->
-      let t, version = Symbols.Maps.find x context.tc_vars in
+      let t, x' = Symbols.Maps.find x context.tc_vars in
       let t = got_type context t in
-      Var_version(x, version), t
+      Var_v(x'), t
    | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
       let lhs, lhs_t = type_check_expr operand_context lhs in
@@ -226,7 +224,7 @@ let rec type_check
             tc_vars = Symbols.Maps.add
                dest (src_type, dest_version) context.tc_vars;
             tc_facts =
-               Comparison(EQ, Var_version(dest, dest_version), src)
+               Comparison(EQ, Var_v(dest_version), src)
                   :: context.tc_facts}
          tail
    | If_term(loc, condition, true_part, false_part) ->
@@ -259,13 +257,13 @@ let rec type_check
       Unit_type
    | Jump_term(jmp) ->
       let preconditions = ref jmp.jmp_target.bl_preconditions in
-      Symbols.Maps.iter (fun x (target_t, target_version) ->
+      Symbols.Maps.iter (fun x (target_t, target) ->
          let source_t, source_version = Symbols.Maps.find x context.tc_vars in
          let t = coerce context source_t target_t in
          ignore t;
          preconditions :=
             List.map
-               (substv (x, target_version) (Var_version(x, source_version)))
+               (substv target (Var_v(source_version)))
                !preconditions
       ) jmp.jmp_target.bl_in;
       List.iter (prove state context jmp.jmp_location) !preconditions;
@@ -357,8 +355,8 @@ let resolve_unknowns_in_type
 
 let resolve_unknowns
    (changed: bool ref)
-   (vars: (ttype * version) Symbols.Maps.t):
-   (ttype * version) Symbols.Maps.t
+   (vars: (ttype * symbol_v) Symbols.Maps.t):
+   (ttype * symbol_v) Symbols.Maps.t
 =
    Symbols.Maps.map
       (fun (t, version) -> (resolve_unknowns_in_type changed t, version))

@@ -1,7 +1,5 @@
 open Big_int
 
-type version
-
 type comparison = | EQ | LT | LE
                   | NE | GE | GT
  
@@ -28,18 +26,29 @@ and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
    | Var of symbol
-   | Var_version of symbol * version
+   | Var_v of symbol_v
    | Negation of expr
    | Comparison of comparison * expr * expr
 
+(* A symbol. Each symbol has one symbol object representing it - symbol objects
+   can and should be compared physically (i.e. == not =). *)
 and symbol = {
    sym_id               : int; (* unique identifier *)
    sym_name             : string;
    sym_parent           : symbol option;
    mutable sym_children : symbol list;
    mutable sym_info     : symbol_info;
-   mutable sym_last_version
-                        : version;
+   mutable sym_versions : symbol_v list;
+}
+
+(* A symbol_v is a version of a symbol. In constraints, etc., each symbol_v is
+   a separate variable, even though many symbol_v objects represent the same
+   symbol in the source programme (see: static single assignment form).
+   Objects of symbol_v can and should be compared physically: there is one
+   object for each symbol and version. *)
+and symbol_v = {
+   ver_symbol           : symbol;
+   ver_number           : int; (* for dumping and ordering *)
 }
 
 and symbol_info =
@@ -56,20 +65,20 @@ and subprogram_info = {
 
 exception Already_defined of symbol
 
-module Ordered : Map.OrderedType with type t = symbol
 module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol
+module Maps_v  : Map.S with type key = symbol_v
 
 val root_symbol : symbol
 val dotted_name : symbol -> string list
 val full_name : symbol -> string
-val full_name_with_version : symbol -> version -> string
+val full_name_v : symbol_v -> string
 val string_of_type : ttype -> string
 val string_of_expr : expr -> string
 val describe_symbol : symbol -> string
 val find_in : symbol -> string -> symbol option
 val new_symbol : symbol -> string -> symbol_info -> symbol
-val new_version : symbol -> version
+val new_version : symbol -> symbol_v
 val find : symbol -> string -> symbol option
 val find_variable : symbol -> string -> symbol
 val dump_symbols : unit -> unit

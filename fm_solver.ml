@@ -4,11 +4,9 @@ open Big_int
 exception Non_linear_constraint
 exception Contradiction
 
-type factor = symbol * version
-
 type term =
    | Lin_const of big_int
-   | Lin_mul of big_int * factor
+   | Lin_mul of big_int * symbol_v
 
 type inequality =
    (* Natural[a;b;c] is a+b+c >= 0
@@ -19,22 +17,20 @@ type inequality =
 
 let string_of_term = function
    | Lin_const(i) -> string_of_big_int i
-   | Lin_mul(i,(x,v)) ->
+   | Lin_mul(i,x) ->
       if eq_big_int i unit_big_int then
-         full_name_with_version x v
+         full_name_v x
       else if eq_big_int i (minus_big_int unit_big_int) then
-         "-" ^ full_name_with_version x v
+         "-" ^ full_name_v x
       else
          string_of_big_int i
-            ^ "*" ^ full_name_with_version x v
+            ^ "*" ^ full_name_v x
 
 let string_of_inequality = function
    | Natural [] -> "0 >= 0"
    | Natural(terms) ->
       String.concat " + " (List.map string_of_term terms)
          ^ " >= 0"
-
-let same_factor (x1,v1) (x2,v2) = (x1 == x2) && (v1 = v2)
 
 (* Add a term to a list of terms (preserving the invariants for Natural). *)
 let add_term (terms: term list): term -> term list =
@@ -57,7 +53,7 @@ function
    | Lin_mul(i,x) ->
       let rec loop result = function
          | [] -> Lin_mul(i,x) :: result
-         | Lin_mul(j,x')::tail when same_factor x x' ->
+         | Lin_mul(j,x')::tail when x == x' ->
             let i_add_j = add_big_int i j in
             if eq_big_int i_add_j zero_big_int then
                result @ tail
@@ -91,8 +87,8 @@ let linearise_expr (terms: term list): expr -> term list =
 function
    | Integer_literal(i) ->
       add_term terms (Lin_const(i))
-   | Var_version(x,v) ->
-      add_term terms (Lin_mul(unit_big_int, (x, v)))
+   | Var_v(x) ->
+      add_term terms (Lin_mul(unit_big_int, x))
    | Negation _ | Comparison _ | Boolean_literal _ ->
       (* Irrelevant. *)
       terms
@@ -129,7 +125,7 @@ let coefficient_of x (Natural(terms)) =
    let rec search = function
       | [] -> zero_big_int
       | (Lin_const _)::tail -> search tail
-      | (Lin_mul(i,x'))::_ when same_factor x x' -> i
+      | (Lin_mul(i,x'))::_ when x == x' -> i
       | (Lin_mul _)::tail -> search tail
    in search terms
 
@@ -141,7 +137,7 @@ let occurs x constrs =
 let free_ineqs ineqs =
    let in_term result = function
       | Lin_const _ -> result
-      | Lin_mul(i,(x,v)) -> (x,v)::result
+      | Lin_mul(i,x) -> x::result
    in
    let in_ineq result (Natural(terms)) =
       List.fold_left in_term result terms
@@ -181,7 +177,7 @@ let multiply_sum coef terms =
 let extract_coefficient var m =
    let rec search coef m' = function
        | [] -> (coef, m')
-       | (Lin_mul(i,x))::l when same_factor var x ->
+       | (Lin_mul(i,x))::l when x == var ->
            search (add_big_int i coef) m' l
        | x::l ->
            search coef (x::m') l
@@ -230,7 +226,7 @@ let eliminate x inequalities =
                | None -> ()
          ) b
       ) a;
-      dump ("Eliminated " ^ full_name_with_version (fst x) (snd x)
+      dump ("Eliminated " ^ full_name_v x
          ^ " to get:") !result;
       Some !result
 

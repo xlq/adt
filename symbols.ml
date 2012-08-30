@@ -1,8 +1,6 @@
 open Big_int
 open Misc
 
-type version = int
-
 type comparison = | EQ | LT | LE
                   | NE | GE | GT
 
@@ -21,7 +19,7 @@ and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
    | Var of symbol
-   | Var_version of symbol * version
+   | Var_v of symbol_v
    | Negation of expr
    | Comparison of comparison * expr * expr
 
@@ -31,8 +29,12 @@ and symbol = {
    sym_parent           : symbol option;
    mutable sym_children : symbol list;
    mutable sym_info     : symbol_info;
-   mutable sym_last_version
-                        : version;
+   mutable sym_versions : symbol_v list;
+}
+
+and symbol_v = {
+   ver_symbol           : symbol;
+   ver_number           : int;
 }
 
 and symbol_info =
@@ -58,6 +60,13 @@ end
 
 module Maps = Map.Make(Ordered)
 module Sets = Set.Make(Ordered)
+module Maps_v = Map.Make(struct
+   type t = symbol_v
+   let compare a b =
+      match compare a.ver_symbol.sym_id b.ver_symbol.sym_id with
+         | 0 -> compare a.ver_number b.ver_number
+         | n -> n
+end)
 
 let root_symbol = {
    sym_id            = 0;
@@ -65,7 +74,7 @@ let root_symbol = {
    sym_parent        = None;
    sym_children      = [];
    sym_info          = Package_sym;
-   sym_last_version  = 0;
+   sym_versions      = [];
 }
 
 let dotted_name sym =
@@ -77,8 +86,8 @@ let dotted_name sym =
 let rec full_name sym =
    String.concat "." (dotted_name sym)
 
-let full_name_with_version sym version =
-   full_name sym ^ "#" ^ string_of_int version
+let full_name_v sym_v =
+   full_name sym_v.ver_symbol ^ "#" ^ string_of_int sym_v.ver_number
 
 let string_of_op = function
    | EQ -> "="
@@ -93,7 +102,7 @@ let rec string_of_expr = function
    | Boolean_literal false -> "False"
    | Integer_literal i -> string_of_big_int i
    | Var sym -> full_name sym
-   | Var_version(sym,version) -> full_name_with_version sym version
+   | Var_v sym_v -> full_name_v sym_v
    | Negation(m) -> "not (" ^ string_of_expr m ^ ")"
    | Comparison(op,m,n) ->
       string_of_expr m ^ " "
@@ -135,14 +144,19 @@ let new_symbol scope name info =
       sym_parent        = Some scope;
       sym_children      = [];
       sym_info          = info;
-      sym_last_version  = 0;
+      sym_versions      = [];
    } in
    scope.sym_children <- new_sym :: scope.sym_children;
    new_sym
 
 let new_version sym =
-   sym.sym_last_version <- sym.sym_last_version + 1;
-   sym.sym_last_version
+   let sym_v = {
+      ver_symbol     = sym;
+      ver_number     = (List.fold_left
+         (fun a b -> max a b.ver_number) 0 sym.sym_versions) + 1;
+   } in
+   sym.sym_versions <- sym_v :: sym.sym_versions;
+   sym_v
 
 let find scope name =
    let rec try_scope scope =

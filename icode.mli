@@ -5,7 +5,8 @@
    when the block is entered.
    The intermediate representation contains no control flow
    merges: loops are converted to recursion. This makes
-   typing simpler. *)
+   typing simpler.
+   The intermediate representation is in static single assignment form. *)
 
 open Symbols
 open Formatting
@@ -59,7 +60,7 @@ and block =
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: expr list;
       (* XXX: bl_free_types and bl_free are redundant! *)
-      mutable bl_in           : (ttype * version) Symbols.Maps.t;
+      mutable bl_in           : (ttype * symbol_v) Symbols.Maps.t;
    }
 
 val new_block_id: unit -> int
