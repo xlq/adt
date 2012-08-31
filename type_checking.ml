@@ -315,6 +315,11 @@ let rec type_check
             | param::rest -> param :: search rest
             in parameters := search !parameters
          ) named_args;
+         List.iter (fun param ->
+            Errors.semantic_error call.call_location
+               ("Missing argument for parameter `" ^ param.sym_name
+                  ^ "' of " ^ describe_symbol call.call_target ^ ".")
+         ) !parameters;
          List.iter (prove state context call.call_location) !preconditions;
          Unit_type
       end
