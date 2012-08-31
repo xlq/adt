@@ -13,7 +13,7 @@ type context = {
    (* The current pass. *)
    tc_pass     : pass;
    (* The types and current versions of variables. *)
-   tc_vars     : (ttype * symbol_v) Symbols.Maps.t;
+   tc_vars     : symbol_v Symbols.Maps.t;
    (* The type that's expected of the term or expression being
       typed under this context. *)
    tc_expected : ttype option;
@@ -193,8 +193,8 @@ let rec type_check_expr
       let t = got_type context Integer_type in
       Integer_literal(i), t
    | Var(x) ->
-      let t, x' = Symbols.Maps.find x context.tc_vars in
-      let t = got_type context t in
+      let x' = Symbols.Maps.find x context.tc_vars in
+      let t = got_type context x'.ver_type in
       Var_v(x'), t
    | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
@@ -217,12 +217,12 @@ let rec type_check
             {context with tc_expected = None}
             src
       in
-      let dest_version = new_version dest in
+      let dest_version = new_version dest src_type in
       type_check
          state
          {context with
             tc_vars = Symbols.Maps.add
-               dest (src_type, dest_version) context.tc_vars;
+               dest dest_version context.tc_vars;
             tc_facts =
                Comparison(EQ, Var_v(dest_version), src)
                   :: context.tc_facts}
@@ -257,9 +257,9 @@ let rec type_check
       Unit_type
    | Jump_term(jmp) ->
       let preconditions = ref jmp.jmp_target.bl_preconditions in
-      Symbols.Maps.iter (fun x (target_t, target) ->
-         let source_t, source_version = Symbols.Maps.find x context.tc_vars in
-         let t = coerce context source_t target_t in
+      Symbols.Maps.iter (fun x target ->
+         let source_version = Symbols.Maps.find x context.tc_vars in
+         let t = coerce context source_version.ver_type target.ver_type in
          ignore t;
          preconditions :=
             List.map
@@ -360,11 +360,14 @@ let resolve_unknowns_in_type
 
 let resolve_unknowns
    (changed: bool ref)
-   (vars: (ttype * symbol_v) Symbols.Maps.t):
-   (ttype * symbol_v) Symbols.Maps.t
+   (vars: symbol_v Symbols.Maps.t):
+   symbol_v Symbols.Maps.t
 =
    Symbols.Maps.map
-      (fun (t, version) -> (resolve_unknowns_in_type changed t, version))
+      (fun x ->
+         x.ver_type <-
+            resolve_unknowns_in_type changed x.ver_type;
+         x)
       vars
 
 let type_check_blocks
@@ -379,7 +382,7 @@ let type_check_blocks
          if block == entry_point then begin
             Symbols.Maps.mapi
                (fun parameter_sym parameter_type ->
-                  (parameter_type, new_version parameter_sym))
+                  (new_version parameter_sym parameter_type))
                parameters
          end else begin
             Symbols.Maps.empty
@@ -391,10 +394,10 @@ let type_check_blocks
                vars
             end else begin
                Symbols.Maps.add parameter_sym
-                  ((Unknown_type
-                     {unk_incoming = [];
-                      unk_outgoing = []}),
-                   new_version parameter_sym)
+                  (new_version parameter_sym
+                     (Unknown_type
+                        {unk_incoming = [];
+                         unk_outgoing = []}))
                   vars
             end
          ) block.bl_free initial_vars
@@ -413,7 +416,7 @@ let type_check_blocks
             tc_vars = block.bl_in;
             tc_expected = Some Unit_type;
             tc_facts = List.map
-               (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
+               (bind_versions (fun x -> Symbols.Maps.find x block.bl_in))
                block.bl_preconditions;
          } in
          let t = type_check state context (unsome block.bl_body) in

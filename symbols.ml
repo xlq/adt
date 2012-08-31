@@ -35,6 +35,7 @@ and symbol = {
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int;
+   mutable ver_type     : ttype;
 }
 
 and symbol_info =
@@ -149,11 +150,14 @@ let new_symbol scope name info =
    scope.sym_children <- new_sym :: scope.sym_children;
    new_sym
 
-let new_version sym =
+let new_version sym t =
    let sym_v = {
-      ver_symbol     = sym;
-      ver_number     = (List.fold_left
-         (fun a b -> max a b.ver_number) 0 sym.sym_versions) + 1;
+      ver_symbol = sym;
+      ver_number =
+         (match sym.sym_versions with
+            | [] -> 1
+            | x::_ -> x.ver_number + 1);
+      ver_type = t;
    } in
    sym.sym_versions <- sym_v :: sym.sym_versions;
    sym_v

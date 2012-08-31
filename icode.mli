@@ -60,7 +60,7 @@ and block =
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: expr list;
       (* XXX: bl_free_types and bl_free are redundant! *)
-      mutable bl_in           : (ttype * symbol_v) Symbols.Maps.t;
+      mutable bl_in           : symbol_v Symbols.Maps.t;
    }
 
 val new_block_id: unit -> int

@@ -40,7 +40,7 @@ and block =
       mutable bl_body         : iterm option;
       mutable bl_free         : Symbols.Sets.t;
       mutable bl_preconditions: expr list;
-      mutable bl_in           : (ttype * symbol_v) Symbols.Maps.t;
+      mutable bl_in           : symbol_v Symbols.Maps.t;
    }
 
 let rec dump_term (f: formatter) = function
@@ -80,10 +80,10 @@ let dump_block (f: formatter) (bl: block) =
          puts f ("block" ^ string_of_int bl.bl_id ^ ":");
          break f;
          if not (Symbols.Maps.is_empty bl.bl_in) then begin
-            Symbols.Maps.iter (fun _ (t, x) ->
+            Symbols.Maps.iter (fun _ x ->
                puts f ("| "
                   ^ full_name_v x
-                  ^ ": " ^ string_of_type t);
+                  ^ ": " ^ string_of_type x.ver_type);
                break f
             ) bl.bl_in
          end else if not (Symbols.Sets.is_empty bl.bl_free) then begin
