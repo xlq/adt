@@ -1,12 +1,21 @@
+(* Fourier-Motzkin constraint solver.
+   This solver solves a set of linear inequalities in the integer domain, or
+   reaches a contradiction and raises Contradiction: in this case, the original
+   set of inequalities was unsatisfiable. *)
+
 open Symbols
 open Big_int
 
+(* An input expression is not linear and cannot be solved
+   by this solver. *)
 exception Non_linear_constraint
+
+(* The system of inequalities is unsatisfiable. *)
 exception Contradiction
 
 type term =
-   | Lin_const of big_int
-   | Lin_mul of big_int * symbol_v
+   | Lin_const of big_int (* a constant *)
+   | Lin_mul of big_int * symbol_v (* Lin_mul(i,x) is i multiplied by x *)
 
 type inequality =
    (* Natural[a;b;c] is a+b+c >= 0
