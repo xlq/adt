@@ -12,7 +12,7 @@ type loc = Parse_tree.loc
 
 type iterm =
    | Null_term of loc
-   | Assignment_term of loc * symbol * expr * iterm
+   | Assignment_term of loc * symbol_v * expr * iterm
    | If_term of loc * expr * iterm * iterm
    | Jump_term of jump_info
    | Call_term of call_info * iterm
@@ -46,7 +46,7 @@ and block =
 let rec dump_term (f: formatter) = function
    | Null_term(_) -> puts f "null"
    | Assignment_term(_,x,m,tail) ->
-      puts f (full_name x ^ " := "
+      puts f (full_name_v x ^ " := "
          ^ string_of_expr m ^ ";");
       break f;
       dump_term f tail
@@ -83,7 +83,7 @@ let dump_block (f: formatter) (bl: block) =
             Symbols.Maps.iter (fun _ x ->
                puts f ("| "
                   ^ full_name_v x
-                  ^ ": " ^ string_of_type x.ver_type);
+                  ^ ": " ^ string_of_type (unsome x.ver_type));
                break f
             ) bl.bl_in
          end else if not (Symbols.Sets.is_empty bl.bl_free) then begin
@@ -115,7 +115,7 @@ let calculate_free_names (blocks: block list): unit =
          | Assignment_term(_,x,m,p) ->
             search
                (esearch free bound m)
-               (Symbols.Sets.add x bound)
+               (Symbols.Sets.add x.ver_symbol bound)
                p
          | If_term(_,cond,truep,falsep) ->
             search

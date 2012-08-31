@@ -41,7 +41,7 @@ let rec translate_expr = function
 let rec translate_icode f = function
    | Null_term _ -> ()
    | Assignment_term(loc, dest, src, tail) ->
-      puts f (c_name_of_symbol dest
+      puts f (c_name_of_symbol dest.ver_symbol
          ^ " = " ^ translate_expr src ^ ";");
       break f;
       translate_icode f tail

@@ -164,6 +164,7 @@ let rec translate_statement
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
          let dest' = translate_lvalue context dest in
+         let dest' = new_version dest' in
          let src' = translate_expr context src in
          let cont' =
             translate_statement state

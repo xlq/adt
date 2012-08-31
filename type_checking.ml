@@ -194,7 +194,7 @@ let rec type_check_expr
       Integer_literal(i), t
    | Var(x) ->
       let x' = Symbols.Maps.find x context.tc_vars in
-      let t = got_type context x'.ver_type in
+      let t = got_type context (unsome x'.ver_type) in
       Var_v(x'), t
    | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
@@ -217,14 +217,14 @@ let rec type_check
             {context with tc_expected = None}
             src
       in
-      let dest_version = new_version dest src_type in
+      dest.ver_type <- Some src_type;
       type_check
          state
          {context with
             tc_vars = Symbols.Maps.add
-               dest dest_version context.tc_vars;
+               dest.ver_symbol dest context.tc_vars;
             tc_facts =
-               Comparison(EQ, Var_v(dest_version), src)
+               Comparison(EQ, Var_v(dest), src)
                   :: context.tc_facts}
          tail
    | If_term(loc, condition, true_part, false_part) ->
@@ -259,7 +259,7 @@ let rec type_check
       let preconditions = ref jmp.jmp_target.bl_preconditions in
       Symbols.Maps.iter (fun x target ->
          let source_version = Symbols.Maps.find x context.tc_vars in
-         let t = coerce context source_version.ver_type target.ver_type in
+         let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
          ignore t;
          preconditions :=
             List.map
@@ -366,7 +366,7 @@ let resolve_unknowns
    Symbols.Maps.map
       (fun x ->
          x.ver_type <-
-            resolve_unknowns_in_type changed x.ver_type;
+            Some (resolve_unknowns_in_type changed (unsome x.ver_type));
          x)
       vars
 
@@ -382,7 +382,9 @@ let type_check_blocks
          if block == entry_point then begin
             Symbols.Maps.mapi
                (fun parameter_sym parameter_type ->
-                  (new_version parameter_sym parameter_type))
+                  let param' = new_version parameter_sym in
+                  param'.ver_type <- Some parameter_type;
+                  param')
                parameters
          end else begin
             Symbols.Maps.empty
@@ -393,12 +395,12 @@ let type_check_blocks
             if Symbols.Maps.mem parameter_sym vars then begin
                vars
             end else begin
-               Symbols.Maps.add parameter_sym
-                  (new_version parameter_sym
-                     (Unknown_type
-                        {unk_incoming = [];
-                         unk_outgoing = []}))
-                  vars
+               let param = new_version parameter_sym in
+               param.ver_type <-
+                  Some (Unknown_type
+                     {unk_incoming = [];
+                      unk_outgoing = []});
+               Symbols.Maps.add parameter_sym param vars
             end
          ) block.bl_free initial_vars
    ) blocks;

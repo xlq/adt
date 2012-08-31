@@ -16,9 +16,9 @@ type loc = Parse_tree.loc
 
 type iterm =
    | Null_term of loc
-   | Assignment_term of loc * symbol (* destination *)
-                            * expr   (* source *)
-                            * iterm  (* continuation *)
+   | Assignment_term of loc * symbol_v   (* destination *)
+                            * expr       (* source *)
+                            * iterm      (* continuation *)
    | If_term of loc * expr  (* condition *)
                     * iterm (* true part *)
                     * iterm (* false part *)

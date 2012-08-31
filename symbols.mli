@@ -49,7 +49,7 @@ and symbol = {
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int; (* for dumping and ordering *)
-   mutable ver_type     : ttype;
+   mutable ver_type     : ttype option;
 }
 
 and symbol_info =
@@ -79,7 +79,7 @@ val string_of_expr : expr -> string
 val describe_symbol : symbol -> string
 val find_in : symbol -> string -> symbol option
 val new_symbol : symbol -> string -> symbol_info -> symbol
-val new_version : symbol -> ttype -> symbol_v
+val new_version : symbol -> symbol_v
 val find : symbol -> string -> symbol option
 val find_variable : symbol -> string -> symbol
 val dump_symbols : unit -> unit
