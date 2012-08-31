@@ -68,7 +68,6 @@ exception Already_defined of symbol
 
 module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol
-module Maps_v  : Map.S with type key = symbol_v
 
 val root_symbol : symbol
 val dotted_name : symbol -> string list

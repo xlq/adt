@@ -5,8 +5,33 @@ open Misc
 open Formatting
 open Big_int
 
-let c_name_of_symbol sym =
-   String.concat "__" (dotted_name sym)
+type context = {
+   tc_vars: symbol_v Symbols.Maps.t;
+}
+
+let no_context = {
+   tc_vars = Symbols.Maps.empty;
+}
+
+let c_name_of_parameter sym =
+   sym.sym_name
+
+let c_name_of_variable sym_v =
+   sym_v.ver_symbol.sym_name ^ "__" ^ string_of_int sym_v.ver_number
+
+let c_name_of_symbol_v sym_v =
+   match sym_v.ver_symbol.sym_info with
+      | Variable_sym -> c_name_of_variable sym_v
+      | Parameter_sym _ -> c_name_of_parameter sym_v.ver_symbol
+
+let c_name_of_symbol context sym =
+   match sym.sym_info with
+      | Variable_sym ->
+         c_name_of_variable (Symbols.Maps.find sym context.tc_vars)
+      | Parameter_sym _ ->
+         c_name_of_parameter sym
+      | _ ->
+         String.concat "__" (dotted_name sym)
 
 let c_name_of_type = function
    | Unit_type -> "void"
@@ -21,14 +46,25 @@ let start_output options =
          output_string f "#include \"stdbool.h\"\n";
          options.co_output_file <- Some f
 
-let rec translate_expr = function
-   | Boolean_literal(true) -> "true"
-   | Boolean_literal(false) -> "false"
-   | Integer_literal(i) -> string_of_big_int i
-   | Var(x) -> c_name_of_symbol x
-   | Negation(e) -> "!(" ^ translate_expr e ^ ")"
+let paren prec (sprec, s) =
+   if prec > sprec then
+      "(" ^ s ^ ")"
+   else
+      s
+
+(* The numbers are precedences to avoid generating excessive parentheses. *)
+let rec translate_expr context = function
+   | Boolean_literal(true) -> 100, "true"
+   | Boolean_literal(false) -> 100, "false"
+   | Integer_literal(i) -> 100, string_of_big_int i
+   | Var(x) -> 100, c_name_of_symbol context x
+   | Negation(e) ->
+      let e = translate_expr context e in
+      90, "!" ^ paren 90 e
    | Comparison(op, lhs, rhs) ->
-      "(" ^ translate_expr lhs ^ ") "
+      let lhs = translate_expr context lhs in
+      let rhs = translate_expr context rhs in
+      50, paren 50 lhs ^ " "
          ^ (match op with
             | EQ -> "=="
             | NE -> "!="
@@ -36,35 +72,47 @@ let rec translate_expr = function
             | LE -> "<="
             | GT -> ">"
             | GE -> ">=")
-         ^ " (" ^ translate_expr rhs ^ ")"
+         ^ " " ^ paren 50 rhs
 
-let rec translate_icode f = function
+let rec translate_icode context f = function
    | Null_term _ -> ()
    | Assignment_term(loc, dest, src, tail) ->
-      puts f (c_name_of_symbol dest.ver_symbol
-         ^ " = " ^ translate_expr src ^ ";");
+      puts f (c_name_of_symbol_v dest
+         ^ " = " ^ snd (translate_expr context src) ^ ";");
       break f;
-      translate_icode f tail
+      translate_icode context f tail
    | If_term(loc, cond, true_part, false_part) ->
-      puts f ("if (" ^ translate_expr cond ^ "){");
+      puts f ("if (" ^ snd (translate_expr context cond) ^ "){");
       break f; indent f;
-      translate_icode f true_part;
+      translate_icode context f true_part;
       undent f; puts f "} else {"; break f; indent f;
-      translate_icode f false_part;
+      translate_icode context f false_part;
       undent f; puts f "}"; break f
    | Jump_term(jmp) ->
       puts f ("goto block" ^ string_of_int jmp.jmp_target.bl_id ^ ";");
       break f
    (* | Call_term TODO *)
-   | Inspect_type_term(_,_,tail) -> translate_icode f tail
-   | Static_assert_term(_,_,tail) -> translate_icode f tail
+   | Inspect_type_term(_,_,tail) -> translate_icode context f tail
+   | Static_assert_term(_,_,tail) -> translate_icode context f tail
 
-let translate_block f block =
+let translate_block context f block =
    puts f ("block" ^ string_of_int block.bl_id ^ ": ;");
    break f;
    indent f;
-   translate_icode f (unsome block.bl_body);
+   translate_icode context f (unsome block.bl_body);
    undent f
+
+let declare_locals f subprogram_sym =
+   List.iter (fun sym ->
+      match sym.sym_info with
+         | Variable_sym ->
+            List.iter (fun sym_v ->
+               puts f (c_name_of_type (unsome sym_v.ver_type)
+                  ^ " " ^ c_name_of_symbol_v sym_v ^ ";");
+               break f
+            ) sym.sym_versions
+         | _ -> ()
+   ) subprogram_sym.sym_children
 
 let translate
    (options: compiler_options)
@@ -76,7 +124,7 @@ let translate
    start_output options;
    let f = new_formatter () in
    puts f ("void "
-      ^ c_name_of_symbol subprogram_sym
+      ^ c_name_of_symbol no_context subprogram_sym
       ^ "("
       ^ String.concat ", "
          (List.map
@@ -88,13 +136,17 @@ let translate
    break f;
    puts f "{";
    break f; indent f;
-   translate_block f entry_point;
+
+   declare_locals f subprogram_sym;
+   break f;
+   translate_block {tc_vars=entry_point.bl_in} f entry_point;
    List.iter (fun block ->
       if block != entry_point then
-         translate_block f block
+         translate_block {tc_vars=block.bl_in} f block
    ) blocks;
    undent f;
    puts f "}";
+   break f;
    break f;
    output_string
       (unsome options.co_output_file)

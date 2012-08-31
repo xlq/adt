@@ -61,13 +61,6 @@ end
 
 module Maps = Map.Make(Ordered)
 module Sets = Set.Make(Ordered)
-module Maps_v = Map.Make(struct
-   type t = symbol_v
-   let compare a b =
-      match compare a.ver_symbol.sym_id b.ver_symbol.sym_id with
-         | 0 -> compare a.ver_number b.ver_number
-         | n -> n
-end)
 
 let root_symbol = {
    sym_id            = 0;
