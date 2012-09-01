@@ -1,4 +1,4 @@
-open Options
+open Compiler
 
 let string_of_pos pos =
     pos.Lexing.pos_fname ^ ":"
@@ -33,10 +33,10 @@ let _ =
       Lexing.pos_fname = input_name
    };
 
-   let options = {
+   let compiler = {
       co_output_file_name = c_from_source_file_name input_name;
       co_output_file = None;
    } in
 
    let translation_unit = try_parse Parser.translation_unit lexbuf in
-   Translation.translate options translation_unit
+   Translation.translate compiler translation_unit

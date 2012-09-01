@@ -327,7 +327,7 @@ let translate_subprogram_prototype state context sub =
    state.st_subprograms <-
       (subprogram_sym, sub) :: state.st_subprograms
 
-let translate_subprogram_body options state subprogram_sym sub =
+let translate_subprogram_body compiler state subprogram_sym sub =
    let subprogram_info = match subprogram_sym.sym_info with
       | Subprogram_sym(info) -> info
    in
@@ -348,7 +348,7 @@ let translate_subprogram_body options state subprogram_sym sub =
       state.st_blocks
       entry_point
       parameters;
-   Backend_c.translate options subprogram_sym entry_point state.st_blocks;
+   Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
    state.st_blocks <- []
 
 let translate_declarations state context declarations =
@@ -360,14 +360,16 @@ let translate_declarations state context declarations =
       with Bail_out -> ()
    ) declarations
 
-let finish_translation options state =
+let finish_translation compiler state =
    let subs = state.st_subprograms in
    state.st_subprograms <- [];
    List.iter (fun (sym, sub) ->
-      try translate_subprogram_body options state sym sub
+      Backend_c.declare compiler sym) subs;
+   List.iter (fun (sym, sub) ->
+      try translate_subprogram_body compiler state sym sub
       with Bail_out -> ()) subs
 
-let translate_package options state pkg =
+let translate_package compiler state pkg =
    match pkg.Parse_tree.pkg_name with [name] ->
    let package_sym = new_symbol root_symbol name Package_sym in
    let context =
@@ -379,9 +381,9 @@ let translate_package options state pkg =
    in
    translate_declarations state context
       pkg.Parse_tree.pkg_declarations;
-   finish_translation options state
+   finish_translation compiler state
 
-let translate options translation_unit =
+let translate compiler translation_unit =
    let state = {
       st_subprograms = [];
       st_blocks = [];
@@ -394,6 +396,6 @@ let translate options translation_unit =
             ctx_last_loc   = sub.Parse_tree.sub_location
          } in
          translate_subprogram_prototype state context sub;
-         finish_translation options state
+         finish_translation compiler state
       | Parse_tree.Package_unit pkg ->
-         translate_package options state pkg
+         translate_package compiler state pkg

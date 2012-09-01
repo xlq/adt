@@ -1,5 +1,5 @@
 open Symbols
-open Options
+open Compiler
 open Icode
 open Misc
 open Formatting
@@ -43,7 +43,7 @@ let start_output options =
       | Some _ -> ()
       | None ->
          let f = open_out options.co_output_file_name in
-         output_string f "#include \"stdbool.h\"\n";
+         output_string f "#include \"stdbool.h\"\n\n";
          options.co_output_file <- Some f
 
 let paren prec (sprec, s) =
@@ -114,15 +114,8 @@ let declare_locals f subprogram_sym =
          | _ -> ()
    ) subprogram_sym.sym_children
 
-let translate
-   (options: compiler_options)
-   (subprogram_sym: symbol)
-   (entry_point: block)
-   (blocks: block list)
-=
+let declare_function f subprogram_sym =
    match subprogram_sym.sym_info with Subprogram_sym(sub) ->
-   start_output options;
-   let f = new_formatter () in
    puts f ("void "
       ^ c_name_of_symbol no_context subprogram_sym
       ^ "("
@@ -132,7 +125,31 @@ let translate
                match param.sym_info with Parameter_sym(t) ->
                   c_name_of_type t ^ " " ^ param.sym_name)
             sub.sub_parameters)
-      ^ ")");
+      ^ ")")
+
+let declare
+   (compiler: compiler)
+   (subprogram_sym: symbol)
+=
+   start_output compiler;
+   let f = new_formatter () in
+   declare_function f subprogram_sym;
+   puts f ";";
+   break f;
+   break f;
+   output_string
+      (unsome compiler.co_output_file)
+      (get_fmt_str f)
+
+let translate
+   (compiler: compiler)
+   (subprogram_sym: symbol)
+   (entry_point: block)
+   (blocks: block list)
+=
+   start_output compiler;
+   let f = new_formatter () in
+   declare_function f subprogram_sym;
    break f;
    puts f "{";
    break f; indent f;
@@ -149,5 +166,5 @@ let translate
    break f;
    break f;
    output_string
-      (unsome options.co_output_file)
+      (unsome compiler.co_output_file)
       (get_fmt_str f)
