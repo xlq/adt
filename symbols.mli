@@ -2,7 +2,7 @@ open Big_int
 
 type comparison = | EQ | LT | LE
                   | NE | GE | GT
- 
+
 type ttype =
    (* Unknown_type means the compiler hasn't decided yet,
       but the type will be known by the time type checking
@@ -21,11 +21,11 @@ and unknown = {
       to be coerced into). *)
    mutable unk_outgoing : ttype list;
 }
-   
+
 and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
-   | Var of symbol
+   | Var of Lexing.position * symbol
    | Var_v of symbol_v
    | Negation of expr
    | Comparison of comparison * expr * expr

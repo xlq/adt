@@ -148,7 +148,7 @@ let calculate_free_names (blocks: block list): unit =
          expr -> Symbols.Sets.t
       = function
          | Boolean_literal _ | Integer_literal _ -> free
-         | Var x ->
+         | Var(_,x) ->
             if Symbols.Sets.mem x bound then begin
                (* x was bound further up. *)
                free

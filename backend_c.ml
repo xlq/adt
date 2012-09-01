@@ -57,7 +57,7 @@ let rec translate_expr context = function
    | Boolean_literal(true) -> 100, "true"
    | Boolean_literal(false) -> 100, "false"
    | Integer_literal(i) -> 100, string_of_big_int i
-   | Var(x) -> 100, c_name_of_symbol context x
+   | Var(_,x) -> 100, c_name_of_symbol context x
    | Var_v(x) ->
       (* Note that this happens in the context of bound_arguments.
          This isn't very neat. *)

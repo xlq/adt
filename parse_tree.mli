@@ -4,8 +4,7 @@
 
 open Big_int
 
-type file_location = Lexing.position
-type loc = file_location
+type loc = Lexing.position
 type dotted_name = string list
 
 type translation_unit =

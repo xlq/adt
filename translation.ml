@@ -26,7 +26,7 @@ type context =
       (* Block to "jump" to after current block. *)
       ctx_after      : block option;
       (* Last source location (where control flow came from). *)
-      ctx_last_loc   : Parse_tree.file_location;
+      ctx_last_loc   : Lexing.position;
    }
 
 type state =
@@ -72,8 +72,8 @@ let rec translate_expr
       | Parse_tree.Name(loc, [name]) ->
          let sym = Symbols.find_variable context.ctx_scope name in
          begin match sym.sym_info with
-            | Variable_sym -> Var(sym)
-            | Parameter_sym(declared_type) -> Var(sym)
+            | Variable_sym -> Var(loc, sym)
+            | Parameter_sym(declared_type) -> Var(loc, sym)
             | _ ->
                Errors.semantic_error loc
                   ("Expression expected but "
@@ -114,7 +114,7 @@ let find_block (state: state) (statement: Parse_tree.statement): block option =
    in search state.st_blocks
 
 let make_jump
-   (loc: Parse_tree.file_location)
+   (loc: Lexing.position)
    (target: block): iterm
 =
    Jump_term {

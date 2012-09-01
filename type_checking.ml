@@ -23,7 +23,7 @@ type context = {
 
 type state = {
    (* List of unsolved constraints. *)
-   mutable ts_unsolved  : (Parse_tree.file_location * expr) list;
+   mutable ts_unsolved  : (Lexing.position * expr) list;
 }
 
 exception Type_error
@@ -46,7 +46,7 @@ let rec bind_versions
    | Boolean_literal _
    | Integer_literal _
    | Var_v _ -> e
-   | Var(x) -> Var_v(get_version x)
+   | Var(_,x) -> Var_v(get_version x)
    | Comparison(op, lhs, rhs) ->
       Comparison(op, r lhs, r rhs)
 
@@ -55,7 +55,7 @@ let rec subst x_sym replacement expr =
    let r = subst x_sym replacement in
    match expr with
       | Boolean_literal _ | Integer_literal _ -> expr
-      | Var(x) when (x_sym == x) ->
+      | Var(_,x) when (x_sym == x) ->
          replacement
       | Var _ -> expr
       | Negation(e) -> Negation(r e)
@@ -114,7 +114,7 @@ let rec expressions_match m n =
 let prove
    (state: state)
    (context: context)
-   (loc: Parse_tree.file_location)
+   (loc: Lexing.position)
    (to_prove: expr): unit
 =
    let facts = List.map normalise context.tc_facts in
@@ -192,8 +192,15 @@ let rec type_check_expr
    | Integer_literal(i) ->
       let t = got_type context Integer_type in
       Integer_literal(i), t
-   | Var(x) ->
-      let x' = Symbols.Maps.find x context.tc_vars in
+   | Var(loc,x) ->
+      let x' = try
+         Symbols.Maps.find x context.tc_vars
+      with Not_found ->
+         Errors.semantic_error loc
+            (String.capitalize (describe_symbol x)
+               ^ " might not be initialised yet.");
+         raise Type_error
+      in
       let t = got_type context (unsome x'.ver_type) in
       Var_v(x'), t
    | Comparison(op, lhs, rhs) ->
@@ -258,13 +265,22 @@ let rec type_check
    | Jump_term(jmp) ->
       let preconditions = ref jmp.jmp_target.bl_preconditions in
       Symbols.Maps.iter (fun x target ->
-         let source_version = Symbols.Maps.find x context.tc_vars in
-         let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
-         ignore t;
-         preconditions :=
-            List.map
-               (substv target (Var_v(source_version)))
-               !preconditions
+         try
+            let source_version = try
+               Symbols.Maps.find x context.tc_vars
+            with Not_found ->
+               Errors.semantic_error jmp.jmp_location
+                  (String.capitalize (describe_symbol x)
+                     ^ " might not be initialised yet.");
+               raise Type_error
+            in
+            let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
+            ignore t;
+            preconditions :=
+               List.map
+                  (substv target (Var_v(source_version)))
+                  !preconditions
+         with Type_error -> ()
       ) jmp.jmp_target.bl_in;
       List.iter (prove state context jmp.jmp_location) !preconditions;
       Unit_type
@@ -409,16 +425,25 @@ let type_check_blocks
          end
       in
       block.bl_in <-
-         Symbols.Sets.fold (fun parameter_sym vars ->
-            if Symbols.Maps.mem parameter_sym vars then begin
+         Symbols.Sets.fold (fun x vars ->
+            if Symbols.Maps.mem x vars then begin
                vars
             end else begin
-               let param = new_version parameter_sym in
-               param.ver_type <-
-                  Some (Unknown_type
+               if (block == entry_point) &&
+                  (match x.sym_info with Parameter_sym _ -> false | _ -> true)
+               then begin
+                  (* This is free at the start of the subprogram.
+                     It is therefore uninitialised. *)
+                  vars
+               end else begin
+                  let xv = new_version x in
+                  let t = Unknown_type
                      {unk_incoming = [];
-                      unk_outgoing = []});
-               Symbols.Maps.add parameter_sym param vars
+                      unk_outgoing = []}
+                  in
+                  xv.ver_type <- Some t;
+                  Symbols.Maps.add x xv vars
+               end;
             end
          ) block.bl_free initial_vars
    ) blocks;
