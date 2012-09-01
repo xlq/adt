@@ -31,6 +31,8 @@ and call_info =
       call_location   : loc;
       call_target     : symbol;
       call_arguments  : expr list * (string * expr) list;
+      mutable call_bound_arguments
+                      : expr list;
    }
 
 and block =

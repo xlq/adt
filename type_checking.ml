@@ -272,55 +272,73 @@ let rec type_check
       begin match call.call_target.sym_info with
       | Subprogram_sym(subprogram_info) ->
          let preconditions = ref subprogram_info.sub_preconditions in
-         let parameters = ref subprogram_info.sub_parameters in
+         let (parameters: (symbol * expr option) array) = Array.of_list
+            (List.map (fun parameter_sym ->
+               (parameter_sym, None)) subprogram_info.sub_parameters)
+         in
          let positional_args, named_args = call.call_arguments in
-         let got_argument param arg =
-            match param.sym_info with Parameter_sym(param_type) ->
-            let arg, arg_t = type_check_expr
-               {context with tc_expected = Some param_type} arg
-            in
-            ignore arg_t;
-            preconditions := List.map (subst param arg) !preconditions
+         let got_argument i arg =
+            match parameters.(i) with
+               | (parameter_sym, None) ->
+                  begin
+                     match parameter_sym.sym_info with Parameter_sym(param_type) ->
+                     let arg, arg_t = type_check_expr
+                        {context with tc_expected = Some param_type} arg
+                     in
+                     ignore arg_t;
+                     preconditions := List.map (subst parameter_sym arg) !preconditions;
+                     parameters.(i) <- (parameter_sym, Some arg)
+                  end
+               | (parameter_sym, Some _) ->
+                  Errors.semantic_error call.call_location
+                     ("Parameter `" ^ parameter_sym.sym_name
+                        ^ "' specified twice.")
          in
          (* Bind positional arguments. *)
-         List.iter (fun arg ->
-            match !parameters with
-            | [] ->
+         list_iteri (fun i arg ->
+            if i >= Array.length parameters then begin
                Errors.semantic_error call.call_location
                   ("Too many arguments to "
-                     ^ describe_symbol call.call_target ^ ".");
-            | param::remaining_params ->
-               parameters := remaining_params;
-               got_argument param arg
+                     ^ describe_symbol call.call_target ^ ".")
+            end else begin
+               got_argument i arg
+            end
          ) positional_args;
          (* Bind named arguments. *)
          List.iter (fun (name, arg) ->
-            let rec search = function
-            | [] ->
-               if List.exists
-                  (fun param -> param.sym_name = name)
-                  subprogram_info.sub_parameters
-               then begin
-                  Errors.semantic_error call.call_location
-                     ("Parameter `" ^ name ^ "' specified twice.")
-               end else begin
+            let rec search i =
+               if i >= Array.length parameters then begin
                   Errors.semantic_error call.call_location
                      ("Parameter `" ^ name ^ "' doesn't exist in call to "
                         ^ describe_symbol call.call_target ^ ".")
-               end;
-               []
-            | param::rest when param.sym_name = name ->
-               got_argument param arg;
-               rest
-            | param::rest -> param :: search rest
-            in parameters := search !parameters
+               end else if (fst parameters.(i)).sym_name = name then begin
+                  got_argument i arg
+               end else begin
+                  search (i + 1)
+               end
+            in search 0
          ) named_args;
-         List.iter (fun param ->
-            Errors.semantic_error call.call_location
-               ("Missing argument for parameter `" ^ param.sym_name
-                  ^ "' of " ^ describe_symbol call.call_target ^ ".")
-         ) !parameters;
+         (* Check that all parameters have arguments. *)
+         Array.iter (function
+            | (_, Some _) -> ()
+            | (parameter_sym, None) ->
+               Errors.semantic_error call.call_location
+                  ("Missing argument for parameter `" ^ parameter_sym.sym_name
+                     ^ "' of " ^ describe_symbol call.call_target ^ ".")
+         ) parameters;
+         (* Prove that this subprogram's preconditions can be met, assuming
+            the facts we know. *)
          List.iter (prove state context call.call_location) !preconditions;
+         (* Store the argument binding for later translation stages. *)
+         call.call_bound_arguments <-
+            begin
+               let rec loop bound_arguments = function
+                  | 0 -> bound_arguments
+                  | i ->
+                     let _, Some arg = parameters.(i-1) in
+                     loop (arg::bound_arguments) (i-1)
+               in loop [] (Array.length parameters)
+            end;
          Unit_type
       end
    | Static_assert_term(loc, expr, tail) ->

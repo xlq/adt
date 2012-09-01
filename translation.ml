@@ -223,7 +223,9 @@ let rec translate_statement
                Call_term(
                   {call_location    = loc;
                    call_target      = subprogram_sym;
-                   call_arguments   = (positional_args, named_args)},
+                   call_arguments   = (positional_args, named_args);
+                   call_bound_arguments = [];
+                  },
                   translate_statement state context tail)
             | _ ->
                Errors.semantic_error loc

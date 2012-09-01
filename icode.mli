@@ -43,6 +43,10 @@ and call_info =
       call_location   : loc;
       call_target     : symbol;
       call_arguments  : expr list * (string * expr) list;
+      (* call_bound_arguments is set once the target subprogram has been
+         chosen. The list is in the same order as the target's parameters. *)
+      mutable call_bound_arguments
+                      : expr list;
    }
 
 and block =

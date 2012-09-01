@@ -58,6 +58,10 @@ let rec translate_expr context = function
    | Boolean_literal(false) -> 100, "false"
    | Integer_literal(i) -> 100, string_of_big_int i
    | Var(x) -> 100, c_name_of_symbol context x
+   | Var_v(x) ->
+      (* Note that this happens in the context of bound_arguments.
+         This isn't very neat. *)
+      100, c_name_of_symbol context x.ver_symbol
    | Negation(e) ->
       let e = translate_expr context e in
       90, "!" ^ paren 90 e
@@ -91,7 +95,13 @@ let rec translate_icode context f = function
    | Jump_term(jmp) ->
       puts f ("goto block" ^ string_of_int jmp.jmp_target.bl_id ^ ";");
       break f
-   (* | Call_term TODO *)
+   | Call_term(call, tail) ->
+      puts f (c_name_of_symbol context call.call_target ^ "("
+         ^ String.concat ", "
+            (List.map (fun arg -> snd (translate_expr context arg)) call.call_bound_arguments)
+         ^ ");");
+      break f;
+      translate_icode context f tail
    | Inspect_type_term(_,_,tail) -> translate_icode context f tail
    | Static_assert_term(_,_,tail) -> translate_icode context f tail
 
