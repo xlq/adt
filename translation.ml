@@ -25,8 +25,6 @@ type context =
       ctx_scope      : symbol;
       (* Block to "jump" to after current block. *)
       ctx_after      : block option;
-      (* Last source location (where control flow came from). *)
-      ctx_last_loc   : Lexing.position;
    }
 
 type state =
@@ -160,31 +158,22 @@ let rec translate_statement
             | None ->
                Null_term(loc)
             | Some cont ->
-               make_jump context.ctx_last_loc cont
+               make_jump loc cont
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
          let dest' = translate_lvalue context dest in
          let dest' = new_version dest' in
          let src' = translate_expr context src in
-         let cont' =
-            translate_statement state
-               {context with ctx_last_loc = loc}
-               cont
-         in
+         let cont' = translate_statement state context cont in
          Assignment_term(loc, dest', src', cont')
       | Parse_tree.If_statement(loc, condition, true_part, false_part, cont) ->
-         let cont = translate_block state
-            {context with ctx_last_loc = loc}
-            cont
-         in
+         let cont = translate_block state context cont in
          If_term(loc,
             translate_expr context condition,
             translate_statement state
-               {context with ctx_after = Some cont;
-                             ctx_last_loc = loc} true_part,
+               {context with ctx_after = Some cont} true_part,
             translate_statement state
-               {context with ctx_after = Some cont;
-                             ctx_last_loc = loc} false_part)
+               {context with ctx_after = Some cont} false_part)
       | Parse_tree.While_loop(loc, condition, body, cont) ->
          (* XXX: If we're at the start of a block, make_block will do nothing! *)
          let condition_block =
@@ -193,14 +182,9 @@ let rec translate_statement
                   If_term(loc,
                      translate_expr context condition,
                      translate_statement state
-                        {context with
-                           ctx_last_loc = get_loc_of_expression condition;
-                           ctx_after = Some loop_start}
+                        {context with ctx_after = Some loop_start}
                         body,
-                     translate_statement state
-                        {context with
-                           ctx_last_loc = get_loc_of_expression condition}
-                        cont))
+                     translate_statement state context cont))
          in
          (*condition_block.bl_free <- !annotations;*)
          make_jump loc condition_block
@@ -290,7 +274,6 @@ let translate_subprogram_prototype state context sub =
    let context = {context with
       ctx_scope = subprogram_sym;
       ctx_after = None;
-      ctx_last_loc = sub.Parse_tree.sub_location;
    } in
    (* Translate parameters. *)
    subprogram_info.sub_parameters <-
@@ -337,7 +320,6 @@ let translate_subprogram_body compiler state subprogram_sym sub =
    let context = {
       ctx_scope = subprogram_sym;
       ctx_after = None;
-      ctx_last_loc = sub.Parse_tree.sub_location;
    } in
    assert (match state.st_blocks with [] -> true | _ -> false);
    let entry_point =
@@ -378,7 +360,6 @@ let translate_package compiler state pkg =
       {
          ctx_scope      = package_sym;
          ctx_after      = None;
-         ctx_last_loc   = pkg.Parse_tree.pkg_location;
       }
    in
    translate_declarations state context
@@ -395,7 +376,6 @@ let translate compiler translation_unit =
          let context = {
             ctx_scope      = root_symbol;
             ctx_after      = None;
-            ctx_last_loc   = sub.Parse_tree.sub_location
          } in
          translate_subprogram_prototype state context sub;
          finish_translation compiler state

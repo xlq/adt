@@ -271,7 +271,7 @@ let rec type_check
             with Not_found ->
                Errors.semantic_error jmp.jmp_location
                   (String.capitalize (describe_symbol x)
-                     ^ " might not be initialised yet.");
+                     ^ " must be initialised by now, but might not be.");
                raise Type_error
             in
             let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
