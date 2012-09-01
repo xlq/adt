@@ -339,7 +339,7 @@ let rec type_check
                      loop (arg::bound_arguments) (i-1)
                in loop [] (Array.length parameters)
             end;
-         Unit_type
+         type_check state context tail
       end
    | Static_assert_term(loc, expr, tail) ->
       let expr, expr_t =
