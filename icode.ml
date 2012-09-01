@@ -10,6 +10,10 @@ let new_block_id () =
 
 type loc = Parse_tree.loc
 
+type liveness_origin =
+   | Used_variable of Lexing.position
+   | From_parameters
+
 type iterm =
    | Null_term of loc
    | Assignment_term of loc * symbol_v * expr * iterm
@@ -40,9 +44,9 @@ and block =
       bl_id                   : int;
       bl_statement            : Parse_tree.statement;
       mutable bl_body         : iterm option;
-      mutable bl_free         : Symbols.Sets.t;
+      mutable bl_free         : liveness_origin Symbols.Maps.t;
       mutable bl_preconditions: expr list;
-      mutable bl_in           : symbol_v Symbols.Maps.t;
+      mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
    }
 
 let rec dump_term (f: formatter) = function
@@ -82,14 +86,14 @@ let dump_block (f: formatter) (bl: block) =
          puts f ("block" ^ string_of_int bl.bl_id ^ ":");
          break f;
          if not (Symbols.Maps.is_empty bl.bl_in) then begin
-            Symbols.Maps.iter (fun _ x ->
+            Symbols.Maps.iter (fun _ (_, x) ->
                puts f ("| "
                   ^ full_name_v x
                   ^ ": " ^ string_of_type (unsome x.ver_type));
                break f
             ) bl.bl_in
-         end else if not (Symbols.Sets.is_empty bl.bl_free) then begin
-            Symbols.Sets.iter (fun x ->
+         end else if not (Symbols.Maps.is_empty bl.bl_free) then begin
+            Symbols.Maps.iter (fun x origin ->
                puts f ("| " ^ full_name x ^ ": <unknown>");
                break f
             ) bl.bl_free
@@ -106,12 +110,38 @@ let dump_block (f: formatter) (bl: block) =
 let dump_blocks (f: formatter) (blocks: block list) =
    List.iter (dump_block f) blocks
 
+let map_minus_set
+   (a: 'a Symbols.Maps.t)
+   (b: Symbols.Sets.t): 'a Symbols.Maps.t
+=
+   Symbols.Sets.fold Symbols.Maps.remove b a
+
+let equal_keys a b =
+   let rec compare = function
+      | [], [] -> true
+      | [], _ | _, [] -> false
+      | (x,_)::l, (x',_)::l' when x == x' -> compare (l, l')
+      | _::_, _::_ -> false
+   in compare (Symbols.Maps.bindings a, Symbols.Maps.bindings b)
+
+let map_union_map =
+   Symbols.Maps.merge
+      (fun _ a b ->
+         match a, b with
+            | None, None -> None
+            | Some a, None -> Some a
+            | None, Some b -> Some b
+            | Some a, Some b ->
+               (* Choose one arbitrarily. *)
+               Some a
+      )
+
 let calculate_free_names (blocks: block list): unit =
    (* First pass: collect free and bound names. *)
    let (jumps: (block * jump_info) list ref) = ref [] in
    List.iter (fun block ->
-      let rec search (free: Symbols.Sets.t) (bound: Symbols.Sets.t):
-         iterm -> Symbols.Sets.t
+      let rec search (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
+         iterm -> liveness_origin Symbols.Maps.t
       = function
          | Null_term _ | Inspect_type_term _ -> free
          | Assignment_term(_,x,m,p) ->
@@ -144,22 +174,22 @@ let calculate_free_names (blocks: block list): unit =
             search
                (esearch free bound expr)
                bound tail
-      and esearch (free: Symbols.Sets.t) (bound: Symbols.Sets.t):
-         expr -> Symbols.Sets.t
+      and esearch (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
+         expr -> liveness_origin Symbols.Maps.t
       = function
          | Boolean_literal _ | Integer_literal _ -> free
-         | Var(_,x) ->
+         | Var(loc, x) ->
             if Symbols.Sets.mem x bound then begin
                (* x was bound further up. *)
                free
             end else begin
                (* x is not bound - it was live at the start of this block. *)
-               Symbols.Sets.add x free
+               Symbols.Maps.add x (Used_variable loc) free
             end
          | Comparison(op, lhs, rhs) ->
             esearch (esearch free bound lhs) bound rhs
       in
-      block.bl_free <- search Symbols.Sets.empty Symbols.Sets.empty
+      block.bl_free <- search Symbols.Maps.empty Symbols.Sets.empty
          (unsome block.bl_body)
    ) blocks;
 
@@ -169,16 +199,16 @@ let calculate_free_names (blocks: block list): unit =
       changed := false;
       List.iter (fun (block, jump) ->
          let jump_free =
-            Symbols.Sets.diff
+            map_minus_set
                jump.jmp_target.bl_free (* variables that are free in the jump target *)
                jump.jmp_bound          (* and are not bound above the jump in its block *)
          in
          let new_free =
-            Symbols.Sets.union
+            map_union_map
                block.bl_free
                jump_free
          in
-         if not (Symbols.Sets.equal block.bl_free new_free) then begin
+         if not (equal_keys block.bl_free new_free) then begin
             block.bl_free <- new_free;
             changed := true
          end

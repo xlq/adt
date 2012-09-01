@@ -35,6 +35,12 @@ let assert_unit t =
       | Unit_type -> true
       | _ -> false)
 
+let report_liveness_origin sym = function
+   | Used_variable loc ->
+      Errors.semantic_error loc
+         (String.capitalize (describe_symbol sym)
+            ^ " is used here.")
+
 (* Get versions for the variables in the given expression.
    I.e. change all Var to Var_version. *)
 let rec bind_versions
@@ -264,7 +270,7 @@ let rec type_check
       Unit_type
    | Jump_term(jmp) ->
       let preconditions = ref jmp.jmp_target.bl_preconditions in
-      Symbols.Maps.iter (fun x target ->
+      Symbols.Maps.iter (fun x (origin, target) ->
          try
             let source_version = try
                Symbols.Maps.find x context.tc_vars
@@ -272,6 +278,7 @@ let rec type_check
                Errors.semantic_error jmp.jmp_location
                   (String.capitalize (describe_symbol x)
                      ^ " must be initialised by now, but might not be.");
+               report_liveness_origin x origin;
                raise Type_error
             in
             let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
@@ -394,14 +401,14 @@ let resolve_unknowns_in_type
 
 let resolve_unknowns
    (changed: bool ref)
-   (vars: symbol_v Symbols.Maps.t):
-   symbol_v Symbols.Maps.t
+   (vars: ('a * symbol_v) Symbols.Maps.t):
+   ('a * symbol_v) Symbols.Maps.t
 =
    Symbols.Maps.map
-      (fun x ->
+      (fun (origin, x) ->
          x.ver_type <-
             Some (resolve_unknowns_in_type changed (unsome x.ver_type));
-         x)
+         (origin, x))
       vars
 
 let type_check_blocks
@@ -418,14 +425,14 @@ let type_check_blocks
                (fun parameter_sym parameter_type ->
                   let param' = new_version parameter_sym in
                   param'.ver_type <- Some parameter_type;
-                  param')
+                  (From_parameters, param'))
                parameters
          end else begin
             Symbols.Maps.empty
          end
       in
       block.bl_in <-
-         Symbols.Sets.fold (fun x vars ->
+         Symbols.Maps.fold (fun x origin vars ->
             if Symbols.Maps.mem x vars then begin
                vars
             end else begin
@@ -442,7 +449,7 @@ let type_check_blocks
                       unk_outgoing = []}
                   in
                   xv.ver_type <- Some t;
-                  Symbols.Maps.add x xv vars
+                  Symbols.Maps.add x (origin, xv) vars
                end;
             end
          ) block.bl_free initial_vars
@@ -458,10 +465,10 @@ let type_check_blocks
          } in
          let context = {
             tc_pass = if !first_pass then Guessing_pass else Checking_pass;
-            tc_vars = block.bl_in;
+            tc_vars = Symbols.Maps.map snd block.bl_in;
             tc_expected = Some Unit_type;
             tc_facts = List.map
-               (bind_versions (fun x -> Symbols.Maps.find x block.bl_in))
+               (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
                block.bl_preconditions;
          } in
          let t = type_check state context (unsome block.bl_body) in

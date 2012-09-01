@@ -166,10 +166,10 @@ let translate
 
    declare_locals f subprogram_sym;
    break f;
-   translate_block {tc_vars=entry_point.bl_in} f entry_point;
+   translate_block {tc_vars=Symbols.Maps.map snd entry_point.bl_in} f entry_point;
    List.iter (fun block ->
       if block != entry_point then
-         translate_block {tc_vars=block.bl_in} f block
+         translate_block {tc_vars=Symbols.Maps.map snd block.bl_in} f block
    ) blocks;
    undent f;
    puts f "}";

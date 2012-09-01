@@ -138,7 +138,7 @@ let make_block
                bl_id             = new_block_id ();
                bl_statement      = statement;
                bl_body           = None;
-               bl_free           = Symbols.Sets.empty;
+               bl_free           = Symbols.Maps.empty;
                bl_preconditions  = [];
                bl_in             = Symbols.Maps.empty;
             }
@@ -271,7 +271,7 @@ let translate_subprogram_prototype state context sub =
                ^ describe_symbol sym ^ ".");
          raise Bail_out
    in
-   let context = {context with
+   let context = {(*context with*)
       ctx_scope = subprogram_sym;
       ctx_after = None;
    } in
