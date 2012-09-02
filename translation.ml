@@ -25,7 +25,7 @@ type after =
    (* Return_with(sub, constr)
       Return from subprogram sub: the postconditions constr
       must be met. *)
-   | Return_with of symbol * expr list
+   | Return_from of symbol
 
 type state =
    {
@@ -158,13 +158,12 @@ let rec translate_statement
    match statement with
       | Parse_tree.No_statement(loc) | Parse_tree.Null_statement(loc) ->
          begin match after with
-            | Return_with(sub, constraints) ->
-               Null_term(
-                  loc,
-                  List.map
-                     (fun constr ->
-                        (From_postconditions(loc, sub), constr))
-                     constraints)
+            | Return_from(sub) ->
+               Return_term {
+                  ret_location = loc;
+                  ret_subprogram = sub;
+                  ret_versions = Symbols.Maps.empty
+               }
             | Continue_with cont ->
                make_jump loc cont
          end
@@ -259,18 +258,6 @@ and translate_block
    make_block state statement
       (fun _ -> translate_statement state scope after statement)
 
-(* Make a sym -> type map of a subprogram's parameters. *)
-let parameters_of_subprogram sym =
-   match sym.sym_info with
-   | Subprogram_sym(subprogram_info) ->
-      List.fold_left (fun result param ->
-         match param.sym_info with
-            | Parameter_sym(mode, t) ->
-               Symbols.Maps.add param (mode, t) result
-            | _ ->
-               result
-         ) Symbols.Maps.empty subprogram_info.sub_parameters
-
 let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
    let subprogram_info = {
@@ -333,12 +320,11 @@ let translate_subprogram_body compiler state subprogram_sym sub =
    let subprogram_info = match subprogram_sym.sym_info with
       | Subprogram_sym(info) -> info
    in
-   let parameters = parameters_of_subprogram subprogram_sym in
    let scope = subprogram_sym in
    assert (match state.st_blocks with [] -> true | _ -> false);
    let entry_point =
       translate_block state scope
-         (Return_with(subprogram_sym, subprogram_info.sub_postconditions))
+         (Return_from(subprogram_sym))
          sub.Parse_tree.sub_body
    in
    entry_point.bl_preconditions <- List.map
@@ -348,11 +334,16 @@ let translate_subprogram_body compiler state subprogram_sym sub =
             subprogram_sym),
           precondition))
       subprogram_info.sub_preconditions;
+   entry_point.bl_in <-
+      List.fold_left
+         (fun bl_in param ->
+            Symbols.Maps.add param
+               (From_parameters, new_version param) bl_in)
+         Symbols.Maps.empty subprogram_info.sub_parameters;
    calculate_free_names state.st_blocks;
    Type_checking.type_check_blocks
       state.st_blocks
-      entry_point
-      parameters;
+      entry_point;
    Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
    state.st_blocks <- []
 

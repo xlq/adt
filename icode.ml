@@ -13,6 +13,7 @@ type loc = Parse_tree.loc
 type liveness_origin =
    | Used_variable of Lexing.position
    | From_parameters
+   | Returned_parameter of Lexing.position
 
 type constraint_origin =
    | From_postconditions of Lexing.position * symbol
@@ -20,13 +21,24 @@ type constraint_origin =
    | From_static_assertion of Lexing.position
 
 type iterm =
-   | Null_term of loc * (constraint_origin * expr) list
    | Assignment_term of loc * expr * expr * iterm
    | If_term of loc * expr * iterm * iterm
+   | Return_term of return_info
    | Jump_term of jump_info
    | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
+
+and return_info =
+   {
+      ret_location      : loc;
+      (* Subprogram being returned from. *)
+      ret_subprogram    : symbol;
+      (* Versions of variables to bind to the out parameters
+         of the subprogram. This is empty until after
+         calculate_free_names. *)
+      ret_versions      : symbol_v Symbols.Maps.t;
+   }
 
 and jump_info =
    {
@@ -55,7 +67,7 @@ and block =
    }
 
 let rec dump_term (f: formatter) = function
-   | Null_term(_) -> puts f "null"
+   | Return_term(_) -> puts f "return"
    | Assignment_term(_,x,m,tail) ->
       puts f (string_of_expr x ^ " := "
          ^ string_of_expr m ^ ";");
@@ -180,10 +192,21 @@ let rec bind_versions_expr context e =
 
 let rec bind_versions context iterm =
    match iterm with
-      | Null_term(loc, constr) ->
-         Null_term(loc,
-            List.map (fun (origin, constr) ->
-               (origin, bind_versions_expr context constr)) constr)
+      | Return_term(ret) ->
+         begin match ret.ret_subprogram.sym_info with Subprogram_sym(info) ->
+            let versions =
+               List.fold_left (fun versions param ->
+                  match param.sym_info with
+                     | Parameter_sym((Out_parameter|In_out_parameter), _) ->
+                        Symbols.Maps.add param
+                           (Symbols.Maps.find param context)
+                           versions
+                     | Parameter_sym((Const_parameter|In_parameter), _) ->
+                        versions
+               ) Symbols.Maps.empty info.sub_parameters
+            in
+            Return_term {ret with ret_versions = versions}
+         end
       | Assignment_term(loc, dest, src, tail) ->
          let src = bind_versions_expr context src in
          let context = bind_versions_lvalue context dest in
@@ -247,10 +270,23 @@ let calculate_free_names (blocks: block list): unit =
          (bound: Symbols.Sets.t):
          iterm -> (liveness_origin * symbol_v) Symbols.Maps.t
       = function
-         | Null_term(_,constr) ->
-            List.fold_left
-               (fun free (_, constr) -> esearch free bound constr)
-               free constr
+         | Return_term(ret) ->
+            begin match ret.ret_subprogram.sym_info with Subprogram_sym(info) ->
+               (* All the out parameters not in bound are free in this block. *)
+               List.fold_left (fun free param ->
+                  match param.sym_info with
+                     | Parameter_sym((Const_parameter | In_parameter),_) ->
+                        free
+                     | Parameter_sym((In_out_parameter | Out_parameter),_) ->
+                        if (Symbols.Sets.mem param bound)
+                        || (Symbols.Maps.mem param free) then
+                           free
+                        else
+                           Symbols.Maps.add param
+                              (Returned_parameter ret.ret_location, new_version param)
+                              free
+                  ) free info.sub_parameters
+            end
          | Inspect_type_term _ -> free
          | Assignment_term(_,dest,src,p) ->
             let free, bound = esearch_lvalue free bound dest in
@@ -311,6 +347,8 @@ let calculate_free_names (blocks: block list): unit =
             if Symbols.Sets.mem x bound then begin
                (* x was bound further up. *)
                free
+            end else if Symbols.Maps.mem x free then begin
+               free
             end else begin
                (* x is not bound - it was live at the start of this block. *)
                Symbols.Maps.add x (Used_variable loc, new_version x) free
@@ -325,7 +363,7 @@ let calculate_free_names (blocks: block list): unit =
          | Var_v(loc, x) ->
             free, Symbols.Sets.add x.ver_symbol bound
       in
-      block.bl_in <- search Symbols.Maps.empty Symbols.Sets.empty
+      block.bl_in <- search block.bl_in Symbols.Sets.empty
          (unsome block.bl_body)
    ) blocks;
 
@@ -355,5 +393,9 @@ let calculate_free_names (blocks: block list): unit =
    (* Bind variables to versions. *)
    List.iter (fun block ->
       let context = Symbols.Maps.map snd block.bl_in in
+      block.bl_preconditions <- List.map
+         (fun (origin, constr) ->
+            (origin, bind_versions_expr context constr))
+         block.bl_preconditions;
       block.bl_body <- Some (bind_versions context (unsome block.bl_body))
    ) blocks

@@ -38,6 +38,10 @@ let report_liveness_origin sym = function
       Errors.semantic_error loc
          (String.capitalize (describe_symbol sym)
             ^ " is used here.")
+   | Returned_parameter loc ->
+      Errors.semantic_error loc
+         ("Out " ^ describe_symbol sym
+            ^ " is returned here.")
 
 (* Substitute a variable with a term, in the given expression. *)
 let rec subst x_sym replacement expr =
@@ -233,11 +237,25 @@ let rec type_check
    (context: context)
    (iterm: iterm): ttype
 = match iterm with
-   | Null_term(loc, constr) ->
-      List.iter
-         (fun (origin, constr) ->
-            (prove state context origin constr))
-         constr;
+   | Return_term(ret) ->
+      begin match ret.ret_subprogram.sym_info with Subprogram_sym(info) ->
+         let postconditions = ref info.sub_postconditions in
+         List.iter (fun param ->
+            match param.sym_info with
+               | Parameter_sym((Out_parameter | In_out_parameter), t) ->
+                  let src_version = Symbols.Maps.find param ret.ret_versions in
+                  ignore (coerce context (unsome src_version.ver_type) t);
+                  postconditions :=
+                     List.map (subst param (Var_v(ret.ret_location, src_version)))
+                        !postconditions;
+               | Parameter_sym((Const_parameter | In_parameter), _) -> ()
+         ) info.sub_parameters;
+         List.iter (fun constr ->
+            prove state context
+               (From_postconditions(ret.ret_location, ret.ret_subprogram))
+               constr
+         ) !postconditions
+      end;
       got_type context Unit_type
    | Assignment_term(loc, dest, src, tail) ->
       let src_type =
@@ -287,14 +305,16 @@ let rec type_check
                Symbols.Maps.find x jmp.jmp_versions
             with Not_found ->
                (* XXX: Is this ever reachable? *)
+               prerr_endline "YES, THIS IS REACHABLE.";
                Errors.semantic_error jmp.jmp_location
                   (String.capitalize (describe_symbol x)
                      ^ " must be initialised by now, but might not be.");
                report_liveness_origin x origin;
                raise Type_error
             in
-            let t = coerce context (unsome source_version.ver_type) (unsome target.ver_type) in
-            ignore t;
+            ignore (coerce context
+               (unsome source_version.ver_type)
+               (unsome target.ver_type));
             preconditions :=
                List.map
                   (fun (origin, constr) ->
@@ -507,7 +527,6 @@ let resolve_unknowns
 let type_check_blocks
    (blocks: block list)
    (entry_point: block)
-   (parameters: (param_mode * ttype) Symbols.Maps.t)
 =
    (* For each block, set unknown types for live variables. *)
    List.iter (fun block ->

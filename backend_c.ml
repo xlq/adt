@@ -91,7 +91,9 @@ let translate_lvalue context = function
       end
 
 let rec translate_icode context f = function
-   | Null_term _ -> ()
+   | Return_term _ ->
+      puts f "return;";
+      break f
    | Assignment_term(loc, dest, src, tail) ->
       puts f (translate_lvalue context dest
          ^ " = " ^ snd (translate_expr context src) ^ ";");

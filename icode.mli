@@ -18,6 +18,7 @@ type loc = Parse_tree.loc
 type liveness_origin =
    | Used_variable of Lexing.position
    | From_parameters
+   | Returned_parameter of Lexing.position
 
 (* Reason why a constraint must be solved. *)
 type constraint_origin =
@@ -26,18 +27,28 @@ type constraint_origin =
    | From_static_assertion of Lexing.position
 
 type iterm =
-   (* XXX: constraint_origin in Null_term contains a lot of redundant information. *)
-   | Null_term of loc * (constraint_origin * expr) list   (* postconditions *)
    | Assignment_term of loc * expr       (* destination (L-value) *)
                             * expr       (* source *)
                             * iterm      (* continuation *)
    | If_term of loc * expr  (* condition *)
                     * iterm (* true part *)
                     * iterm (* false part *)
+   | Return_term of return_info
    | Jump_term of jump_info
    | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
+
+and return_info =
+   {
+      ret_location      : loc;
+      (* Subprogram being returned from. *)
+      ret_subprogram    : symbol;
+      (* Versions of variables to bind to the out parameters
+         of the subprogram. This is empty until after
+         calculate_free_names. *)
+      ret_versions      : symbol_v Symbols.Maps.t;
+   }
 
 and jump_info =
    {
