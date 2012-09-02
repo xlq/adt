@@ -16,7 +16,7 @@ type liveness_origin =
 
 type iterm =
    | Null_term of loc
-   | Assignment_term of loc * symbol_v * expr * iterm
+   | Assignment_term of loc * expr * expr * iterm
    | If_term of loc * expr * iterm * iterm
    | Jump_term of jump_info
    | Call_term of call_info * iterm
@@ -27,14 +27,14 @@ and jump_info =
    {
       jmp_location      : loc;
       jmp_target        : block;
-      mutable jmp_bound : Symbols.Sets.t;
+      jmp_versions      : symbol_v Symbols.Maps.t;
    }
 
 and call_info =
    {
       call_location   : loc;
       call_target     : symbol;
-      call_arguments  : expr list * (string * expr) list;
+      call_arguments  : (expr * expr) list * (string * (expr * expr)) list;
       mutable call_bound_arguments
                       : expr list;
    }
@@ -52,7 +52,7 @@ and block =
 let rec dump_term (f: formatter) = function
    | Null_term(_) -> puts f "null"
    | Assignment_term(_,x,m,tail) ->
-      puts f (full_name_v x ^ " := "
+      puts f (string_of_expr x ^ " := "
          ^ string_of_expr m ^ ";");
       break f;
       dump_term f tail
@@ -64,11 +64,20 @@ let rec dump_term (f: formatter) = function
    | Jump_term {jmp_target=bl} ->
       puts f ("tail block" ^ string_of_int bl.bl_id)
    | Call_term(call, tail) ->
+      let positional_args, named_args = call.call_arguments in
       puts f ("call "
          ^ full_name call.call_target
          ^ " (" ^ String.concat ", "
-            (List.map string_of_expr (fst call.call_arguments)
-               @ List.map (fun (_,arg) -> string_of_expr arg) (snd call.call_arguments))
+            (List.map
+               (fun (arg_in, arg_out) ->
+                  "in " ^ string_of_expr arg_in
+                     ^ " out " ^ string_of_expr arg_out)
+               positional_args
+             @ List.map
+               (fun (name, (arg_in, arg_out)) ->
+                  name ^ " => in " ^ string_of_expr arg_in
+                     ^ " out " ^ string_of_expr arg_out)
+               named_args)
          ^ ");");
       break f;
       dump_term f tail
@@ -136,19 +145,86 @@ let map_union_map =
                Some a
       )
 
+let rec bind_versions_lvalue context e =
+   match e with
+      | Var_v(_,x) -> Symbols.Maps.add x.ver_symbol x context
+
+let rec bind_versions_expr context e =
+   match e with
+      | Boolean_literal _
+      | Integer_literal _ -> e
+      | Var(loc, x) -> Var_v(loc, Symbols.Maps.find x context)
+      | Var_v(loc, x) -> raise (Failure "bind_versions_expr")
+      | Negation(e) -> Negation(bind_versions_expr context e)
+      | Comparison(op, lhs, rhs) ->
+         Comparison(op,
+                    bind_versions_expr context lhs,
+                    bind_versions_expr context rhs)
+
+let rec bind_versions context iterm =
+   match iterm with
+      | Null_term _ -> iterm
+      | Assignment_term(loc, dest, src, tail) ->
+         let src = bind_versions_expr context src in
+         let context = bind_versions_lvalue context dest in
+         Assignment_term(loc, dest, src, bind_versions context tail)
+      | If_term(loc, cond, true_part, false_part) ->
+         If_term(loc, bind_versions_expr context cond,
+                      bind_versions context true_part,
+                      bind_versions context false_part)
+      | Jump_term(jmp) ->
+         Jump_term {jmp with
+            jmp_versions = Symbols.Maps.mapi
+               (fun x _ -> Symbols.Maps.find x context)
+               jmp.jmp_target.bl_free}
+      | Call_term(call, tail) ->
+         assert (match call.call_bound_arguments with [] -> true | _ -> false);
+         let positional_args, named_args = call.call_arguments in
+         (* Bind inputs. *)
+         let positional_args =
+            List.map
+               (fun (arg_in, arg_out) ->
+                  (bind_versions_expr context arg_in, arg_out))
+               positional_args
+         in
+         let named_args =
+            List.map
+               (fun (name, (arg_in, arg_out)) ->
+                  (name, (bind_versions_expr context arg_in, arg_out)))
+               named_args
+         in
+         (* Add outputs to context. *)
+         let context =
+            List.fold_left
+               (fun context (arg_in, arg_out) ->
+                  bind_versions_lvalue context arg_out)
+               context positional_args
+         in
+         let context =
+            List.fold_left
+               (fun context (name, (arg_in, arg_out)) ->
+                  bind_versions_lvalue context arg_out)
+               context named_args
+         in
+         Call_term(
+            {call with call_arguments = (positional_args, named_args)},
+            bind_versions context tail)
+      | Inspect_type_term(loc, x, tail) ->
+         Inspect_type_term(loc, x, bind_versions context tail)
+      | Static_assert_term(loc, m, tail) ->
+         Static_assert_term(loc, bind_versions_expr context m, bind_versions context tail)
+
 let calculate_free_names (blocks: block list): unit =
    (* First pass: collect free and bound names. *)
-   let (jumps: (block * jump_info) list ref) = ref [] in
+   let (jumps: (block * jump_info * Symbols.Sets.t) list ref) = ref [] in
    List.iter (fun block ->
       let rec search (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
          iterm -> liveness_origin Symbols.Maps.t
       = function
          | Null_term _ | Inspect_type_term _ -> free
-         | Assignment_term(_,x,m,p) ->
-            search
-               (esearch free bound m)
-               (Symbols.Sets.add x.ver_symbol bound)
-               p
+         | Assignment_term(_,dest,src,p) ->
+            let free, bound = esearch_lvalue free bound dest in
+            search (esearch free bound src) bound p
          | If_term(_,cond,truep,falsep) ->
             search
                (search
@@ -156,18 +232,35 @@ let calculate_free_names (blocks: block list): unit =
                   bound truep)
                bound falsep
          | Jump_term jump ->
-            jump.jmp_bound <- bound;
-            jumps := (block, jump) :: !jumps;
+            jumps := (block, jump, bound) :: !jumps;
             free
          | Call_term(call, tail) ->
             let (pos_args, named_args) = call.call_arguments in
+            (* Add inputs to free variables. *)
             let free =
-               List.fold_left (fun free arg -> esearch free bound arg)
+               List.fold_left
+                  (fun free (arg_in, arg_out) ->
+                     esearch free bound arg_in)
                   free pos_args
             in
             let free =
-               List.fold_left (fun free (_, arg) -> esearch free bound arg)
+               List.fold_left
+                  (fun free (name, (arg_in, arg_out)) ->
+                     esearch free bound arg_in)
                   free named_args
+            in
+            (* Add changed variables in outputs to bound. *)
+            let free, bound =
+               List.fold_left
+                  (fun (free, bound) (arg_in, arg_out) ->
+                     esearch_lvalue free bound arg_out)
+                  (free, bound) pos_args
+            in
+            let free, bound =
+               List.fold_left
+                  (fun (free, bound) (name, (arg_in, arg_out)) ->
+                     esearch_lvalue free bound arg_out)
+                  (free, bound) named_args
             in
             search free bound tail
          | Static_assert_term(loc, expr, tail) ->
@@ -188,6 +281,11 @@ let calculate_free_names (blocks: block list): unit =
             end
          | Comparison(op, lhs, rhs) ->
             esearch (esearch free bound lhs) bound rhs
+      and esearch_lvalue (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
+         expr -> (liveness_origin Symbols.Maps.t) * Symbols.Sets.t
+      = function
+         | Var(loc, x) ->
+            free, Symbols.Sets.add x bound
       in
       block.bl_free <- search Symbols.Maps.empty Symbols.Sets.empty
          (unsome block.bl_body)
@@ -197,11 +295,11 @@ let calculate_free_names (blocks: block list): unit =
    let changed = ref true in
    while (!changed) = true do
       changed := false;
-      List.iter (fun (block, jump) ->
+      List.iter (fun (block, jump, bound) ->
          let jump_free =
             map_minus_set
                jump.jmp_target.bl_free (* variables that are free in the jump target *)
-               jump.jmp_bound          (* and are not bound above the jump in its block *)
+               bound                   (* and are not bound above the jump in its block *)
          in
          let new_free =
             map_union_map
@@ -215,5 +313,11 @@ let calculate_free_names (blocks: block list): unit =
       ) !jumps
    done;
 
-   (* Clean up. *)
-   List.iter (fun (_, jump) -> jump.jmp_bound <- Symbols.Sets.empty) !jumps
+   (* Bind variables to versions. *)
+   List.iter (fun block ->
+      let context = Symbols.Maps.mapi
+         (fun x _ -> new_version x)
+         block.bl_free
+      in
+      block.bl_body <- Some (bind_versions context (unsome block.bl_body))
+   ) blocks

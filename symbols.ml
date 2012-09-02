@@ -19,7 +19,7 @@ and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
    | Var of Lexing.position * symbol
-   | Var_v of symbol_v
+   | Var_v of Lexing.position * symbol_v
    | Negation of expr
    | Comparison of comparison * expr * expr
 
@@ -96,7 +96,7 @@ let rec string_of_expr = function
    | Boolean_literal false -> "False"
    | Integer_literal i -> string_of_big_int i
    | Var(_,sym) -> full_name sym
-   | Var_v sym_v -> full_name_v sym_v
+   | Var_v(_,sym_v) -> full_name_v sym_v
    | Negation(m) -> "not (" ^ string_of_expr m ^ ")"
    | Comparison(op,m,n) ->
       string_of_expr m ^ " "

@@ -12,8 +12,6 @@ type pass =
 type context = {
    (* The current pass. *)
    tc_pass     : pass;
-   (* The types and current versions of variables. *)
-   tc_vars     : symbol_v Symbols.Maps.t;
    (* The type that's expected of the term or expression being
       typed under this context. *)
    tc_expected : ttype option;
@@ -41,21 +39,6 @@ let report_liveness_origin sym = function
          (String.capitalize (describe_symbol sym)
             ^ " is used here.")
 
-(* Get versions for the variables in the given expression.
-   I.e. change all Var to Var_version. *)
-let rec bind_versions
-   (get_version : symbol -> symbol_v)
-   (e: expr): expr
-=
-   let r = bind_versions get_version in
-   match e with
-   | Boolean_literal _
-   | Integer_literal _
-   | Var_v _ -> e
-   | Var(_,x) -> Var_v(get_version x)
-   | Comparison(op, lhs, rhs) ->
-      Comparison(op, r lhs, r rhs)
-
 (* Substitute a variable with a term, in the given expression. *)
 let rec subst x_sym replacement expr =
    let r = subst x_sym replacement in
@@ -72,7 +55,7 @@ let rec substv x replacement expr =
    let r = substv x replacement in
    match expr with
       | Boolean_literal _ | Integer_literal _ -> expr
-      | Var_v(x') when x == x' -> replacement
+      | Var_v(_,x') when x == x' -> replacement
       | Var_v _ -> expr
       | Negation(e) -> Negation(r e)
       | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
@@ -105,7 +88,7 @@ let rec expressions_match m n =
    match m, n with
       | Boolean_literal(b), Boolean_literal(b') -> b = b'
       | Integer_literal(i), Integer_literal(i') -> eq_big_int i i'
-      | Var_v(x), Var_v(x') -> x == x'
+      | Var_v(_,x), Var_v(_,x') -> x == x'
       | Negation(x), Negation(x') -> expressions_match x x'
       | Comparison(op, lhs, rhs), Comparison(op', lhs', rhs') ->
          (op = op') && (expressions_match lhs lhs')
@@ -198,17 +181,16 @@ let rec type_check_expr
    | Integer_literal(i) ->
       let t = got_type context Integer_type in
       Integer_literal(i), t
-   | Var(loc,x) ->
-      let x' = try
-         Symbols.Maps.find x context.tc_vars
-      with Not_found ->
-         Errors.semantic_error loc
-            (String.capitalize (describe_symbol x)
-               ^ " might not be initialised yet.");
-         raise Type_error
-      in
-      let t = got_type context (unsome x'.ver_type) in
-      Var_v(x'), t
+   | Var_v(loc,x) ->
+      begin match x.ver_type with
+         | None ->
+            Errors.semantic_error loc
+               (String.capitalize (describe_symbol x.ver_symbol)
+                  ^ " might not be initialised yet.");
+            raise Type_error
+         | Some t ->
+            Var_v(loc, x), (got_type context t)
+      end
    | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
       let lhs, lhs_t = type_check_expr operand_context lhs in
@@ -216,6 +198,13 @@ let rec type_check_expr
       let _ = coerce context lhs_t rhs_t in
       let result_t = got_type context Boolean_type in
       (Comparison(op, lhs, rhs), result_t)
+
+let assign_to_lvalue
+   (context: context)
+   (dest: expr)
+   (src_type: ttype)
+= match dest with
+   | Var_v(_, x) -> x.ver_type <- Some src_type
 
 let rec type_check
    (state: state)
@@ -230,14 +219,12 @@ let rec type_check
             {context with tc_expected = None}
             src
       in
-      dest.ver_type <- Some src_type;
+      assign_to_lvalue context dest src_type;
       type_check
          state
          {context with
-            tc_vars = Symbols.Maps.add
-               dest.ver_symbol dest context.tc_vars;
             tc_facts =
-               Comparison(EQ, Var_v(dest), src)
+               Comparison(EQ, dest, src)
                   :: context.tc_facts}
          tail
    | If_term(loc, condition, true_part, false_part) ->
@@ -273,8 +260,9 @@ let rec type_check
       Symbols.Maps.iter (fun x (origin, target) ->
          try
             let source_version = try
-               Symbols.Maps.find x context.tc_vars
+               Symbols.Maps.find x jmp.jmp_versions
             with Not_found ->
+               (* XXX: Is this ever reachable? *)
                Errors.semantic_error jmp.jmp_location
                   (String.capitalize (describe_symbol x)
                      ^ " must be initialised by now, but might not be.");
@@ -285,7 +273,7 @@ let rec type_check
             ignore t;
             preconditions :=
                List.map
-                  (substv target (Var_v(source_version)))
+                  (substv target (Var_v(jmp.jmp_location, source_version)))
                   !preconditions
          with Type_error -> ()
       ) jmp.jmp_target.bl_in;
@@ -318,24 +306,24 @@ let rec type_check
                         ^ "' specified twice.")
          in
          (* Bind positional arguments. *)
-         list_iteri (fun i arg ->
+         list_iteri (fun i (arg_in, arg_out) ->
             if i >= Array.length parameters then begin
                Errors.semantic_error call.call_location
                   ("Too many arguments to "
                      ^ describe_symbol call.call_target ^ ".")
             end else begin
-               got_argument i arg
+               got_argument i arg_in
             end
          ) positional_args;
          (* Bind named arguments. *)
-         List.iter (fun (name, arg) ->
+         List.iter (fun (name, (arg_in, arg_out)) ->
             let rec search i =
                if i >= Array.length parameters then begin
                   Errors.semantic_error call.call_location
                      ("Parameter `" ^ name ^ "' doesn't exist in call to "
                         ^ describe_symbol call.call_target ^ ".")
                end else if (fst parameters.(i)).sym_name = name then begin
-                  got_argument i arg
+                  got_argument i arg_in
                end else begin
                   search (i + 1)
                end
@@ -465,11 +453,8 @@ let type_check_blocks
          } in
          let context = {
             tc_pass = if !first_pass then Guessing_pass else Checking_pass;
-            tc_vars = Symbols.Maps.map snd block.bl_in;
             tc_expected = Some Unit_type;
-            tc_facts = List.map
-               (bind_versions (fun x -> snd (Symbols.Maps.find x block.bl_in)))
-               block.bl_preconditions;
+            tc_facts = block.bl_preconditions;
          } in
          let t = type_check state context (unsome block.bl_body) in
          ignore t;

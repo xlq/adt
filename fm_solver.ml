@@ -96,7 +96,7 @@ let linearise_expr (terms: term list): expr -> term list =
 function
    | Integer_literal(i) ->
       add_term terms (Lin_const(i))
-   | Var_v(x) ->
+   | Var_v(_,x) ->
       add_term terms (Lin_mul(unit_big_int, x))
    | Negation _ | Comparison _ | Boolean_literal _ ->
       (* Irrelevant. *)

@@ -26,7 +26,7 @@ and expr =
    | Boolean_literal of bool
    | Integer_literal of big_int
    | Var of Lexing.position * symbol
-   | Var_v of symbol_v
+   | Var_v of Lexing.position * symbol_v
    | Negation of expr
    | Comparison of comparison * expr * expr
 

@@ -21,7 +21,7 @@ type liveness_origin =
 
 type iterm =
    | Null_term of loc
-   | Assignment_term of loc * symbol_v   (* destination *)
+   | Assignment_term of loc * expr       (* destination *)
                             * expr       (* source *)
                             * iterm      (* continuation *)
    | If_term of loc * expr  (* condition *)
@@ -38,16 +38,21 @@ and jump_info =
       jmp_location      : loc;
       (* Target of jump. *)
       jmp_target        : block;
-      (* Variables bound in this jump.
-         Used during liveness analysis. *)
-      mutable jmp_bound : Symbols.Sets.t;
+      (* Versions of variables to bind to the free variables of jmp_target
+         (i.e. jmp_target.bl_free). This is empty until after
+         calculate_free_names. *)
+      jmp_versions      : symbol_v Symbols.Maps.t;
    }
 
 and call_info =
    {
       call_location   : loc;
       call_target     : symbol;
-      call_arguments  : expr list * (string * expr) list;
+      (* Each argument has a pair of expressions (in, out):
+         'in' contains the versions to be passed to the subprogram, while
+         'out' contains new versions, for values to be received from the
+         subprogram (in the case of Out_parameter or In_out_parameter). *)
+      call_arguments  : (expr * expr) list * (string * (expr * expr)) list;
       (* call_bound_arguments is set once the target subprogram has been
          chosen. The list is in the same order as the target's parameters. *)
       mutable call_bound_arguments

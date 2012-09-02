@@ -118,7 +118,7 @@ let make_jump
    Jump_term {
       jmp_location = loc;
       jmp_target = target;
-      jmp_bound = Symbols.Sets.empty;
+      jmp_versions = Symbols.Maps.empty;
    }
 
 (* Create a new block by applying the given translation function. Nothing is
@@ -147,6 +147,9 @@ let make_block
          new_block.bl_body <- Some (translate new_block);
          new_block
 
+let interpret_as_lvalue = function
+   | Var(loc, x) -> Var_v(loc, new_version x)
+
 let rec translate_statement
    (state: state)
    (context: context)
@@ -161,8 +164,7 @@ let rec translate_statement
                make_jump loc cont
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
-         let dest' = translate_lvalue context dest in
-         let dest' = new_version dest' in
+         let dest' = translate_expr context dest in
          let src' = translate_expr context src in
          let cont' = translate_statement state context cont in
          Assignment_term(loc, dest', src', cont')
@@ -197,11 +199,15 @@ let rec translate_statement
             begin match subprogram_sym.sym_info with
             | Subprogram_sym(subprogram_info) ->
                let positional_args = List.map
-                  (translate_expr context)
+                  (fun arg ->
+                     let arg = translate_expr context arg in
+                     (arg, interpret_as_lvalue arg))
                   positional_args
                in
                let named_args = List.map
-                  (fun (name, arg) -> (name, translate_expr context arg))
+                  (fun (name, arg) ->
+                     let arg = translate_expr context arg in
+                     (name, (arg, interpret_as_lvalue arg)))
                   named_args
                in
                Call_term(

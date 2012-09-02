@@ -57,11 +57,7 @@ let rec translate_expr context = function
    | Boolean_literal(true) -> 100, "true"
    | Boolean_literal(false) -> 100, "false"
    | Integer_literal(i) -> 100, string_of_big_int i
-   | Var(_,x) -> 100, c_name_of_symbol context x
-   | Var_v(x) ->
-      (* Note that this happens in the context of bound_arguments.
-         This isn't very neat. *)
-      100, c_name_of_symbol context x.ver_symbol
+   | Var_v(_,x) -> 100, c_name_of_symbol_v x
    | Negation(e) ->
       let e = translate_expr context e in
       90, "!" ^ paren 90 e
@@ -78,10 +74,13 @@ let rec translate_expr context = function
             | GE -> ">=")
          ^ " " ^ paren 50 rhs
 
+let translate_lvalue context = function
+   | Var_v(_,x) -> c_name_of_symbol_v x
+
 let rec translate_icode context f = function
    | Null_term _ -> ()
    | Assignment_term(loc, dest, src, tail) ->
-      puts f (c_name_of_symbol_v dest
+      puts f (translate_lvalue context dest
          ^ " = " ^ snd (translate_expr context src) ^ ";");
       break f;
       translate_icode context f tail
