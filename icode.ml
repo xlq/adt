@@ -148,9 +148,9 @@ let loc_of_constraint_origin = function
 
 let describe_constraint_origin = function
    | From_postconditions(_, sub) ->
-      "a postcondition of " ^ describe_symbol sub
+      "a post-condition of " ^ describe_symbol sub
    | From_preconditions(_, sub) ->
-      "a precondition of calling " ^ describe_symbol sub
+      "a pre-condition of calling " ^ describe_symbol sub
    | From_static_assertion(_) ->
       "a static assertion"
 

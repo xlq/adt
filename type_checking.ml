@@ -40,7 +40,7 @@ let report_liveness_origin sym = function
             ^ " is used here.")
    | Returned_parameter loc ->
       Errors.semantic_error loc
-         ("Out " ^ describe_symbol sym
+         (describe_symbol sym
             ^ " is returned here.")
 
 (* Substitute a variable with a term, in the given expression. *)
@@ -224,6 +224,54 @@ let rec type_check_expr
       let rhs_t = type_check_expr operand_context rhs in
       ignore (coerce context lhs_t rhs_t);
       got_type context Boolean_type
+
+let rec bind_pre_post_condition (post: bool) e =
+   let r = bind_pre_post_condition post in
+   match e with
+      | Boolean_literal _
+      | Integer_literal _ -> e
+      | Var(loc, param) ->
+         begin match param.sym_info with Parameter_sym(mode, t) ->
+            let available = match mode with
+               | Const_parameter | In_parameter | In_out_parameter -> true
+               | Out_parameter -> post
+            in
+            if available then begin
+               Var_v(loc,
+                  {ver_symbol = param;
+                   ver_number = -1;
+                   ver_type = Some t})
+            end else begin
+               Errors.semantic_error loc
+                  (String.capitalize (describe_symbol param)
+                     ^ " is not available in a "
+                     ^ (if post then "post-" else "pre-") ^ "condition.");
+               e
+            end
+         end
+      | Negation(e) -> Negation(r e)
+      | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
+
+let type_check_subprogram_declaration info =
+   let context =
+      {
+         tc_pass = Checking_pass;
+         tc_expected = Some Boolean_type;
+         tc_facts = [];
+      }
+   in
+   List.iter
+      (fun constr ->
+         ignore
+            (type_check_expr context
+               (bind_pre_post_condition false constr)))
+      info.sub_preconditions;
+   List.iter
+      (fun constr ->
+         ignore
+            (type_check_expr context
+               (bind_pre_post_condition true constr)))
+      info.sub_postconditions
 
 let assign_to_lvalue
    (context: context)
@@ -466,7 +514,7 @@ let rec type_check
                in loop [] (Array.length parameters)
             end;
          (* Continue, assuming the postconditions. *)
-         prerr_endline ("Postconditions after call: "
+         prerr_endline ("Post-conditions after call: "
             ^ String.concat " and "
                (List.map string_of_expr !postconditions));
          type_check state

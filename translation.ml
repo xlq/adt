@@ -312,6 +312,7 @@ let translate_subprogram_prototype state scope sub =
    in
    subprogram_info.sub_preconditions <- pre;
    subprogram_info.sub_postconditions <- post;
+   Type_checking.type_check_subprogram_declaration subprogram_info;
    (* Translate the body later. *)
    state.st_subprograms <-
       (subprogram_sym, sub) :: state.st_subprograms

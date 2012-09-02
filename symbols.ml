@@ -127,7 +127,13 @@ let describe_symbol sym =
       | Package_sym     -> "package"
       | Subprogram_sym _-> "subprogram"
       | Variable_sym    -> "variable"
-      | Parameter_sym _ -> "parameter"
+      | Parameter_sym(mode, _) ->
+         (match mode with
+            | Const_parameter -> ""
+            | In_parameter -> "in "
+            | Out_parameter -> "out "
+            | In_out_parameter -> "in out "
+            ) ^ "parameter"
    ) ^ " `" ^ full_name sym ^ "'"
 
 let find_in scope name =
