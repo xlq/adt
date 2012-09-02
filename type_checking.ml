@@ -160,54 +160,54 @@ let prove
             state.ts_unsolved <- (origin, to_prove) :: state.ts_unsolved
          with Fm_solver.Contradiction -> ()
 
-let rec coerce context t1 t2: ttype =
-   try
-      match t1, t2 with
-         | Unit_type, Unit_type ->
-            Unit_type
-         | Boolean_type, Boolean_type
-         | Integer_type, Integer_type ->
-            t1
-         | Unknown_type(unk), t2 ->
-            begin match context.tc_pass with
-               | Guessing_pass ->
-                  prerr_endline "Coercing from Unknown_type.";
-                  unk.unk_outgoing <- t2 :: unk.unk_outgoing;
-                  t2
-               | Checking_pass ->
-                  raise Unresolved_unknown
-            end
-         | t1, Unknown_type(unk) ->
-            begin match context.tc_pass with
-               | Guessing_pass ->
-                  prerr_endline "Coercing to Unknown_type.";
-                  unk.unk_incoming <- t1 :: unk.unk_incoming;
-                  t1
-               | Checking_pass ->
-                  raise Unresolved_unknown
-            end
-   with (Match_failure _) as e ->
-      prerr_endline ("Match failure when trying to coerce `"
-         ^ string_of_type t1 ^ "' into `" ^ string_of_type t2
-         ^ "'.");
-      raise e
+let rec coerce context loc t1 t2: ttype =
+   match t1, t2 with
+      | Unit_type, Unit_type ->
+         Unit_type
+      | Boolean_type, Boolean_type
+      | Integer_type, Integer_type ->
+         t1
+      | Unknown_type(unk), t2 ->
+         begin match context.tc_pass with
+            | Guessing_pass ->
+               prerr_endline "Coercing from Unknown_type.";
+               unk.unk_outgoing <- t2 :: unk.unk_outgoing;
+               t2
+            | Checking_pass ->
+               raise Unresolved_unknown
+         end
+      | t1, Unknown_type(unk) ->
+         begin match context.tc_pass with
+            | Guessing_pass ->
+               prerr_endline "Coercing to Unknown_type.";
+               unk.unk_incoming <- t1 :: unk.unk_incoming;
+               t1
+            | Checking_pass ->
+               raise Unresolved_unknown
+         end
+      | _ ->
+         Errors.semantic_error loc
+            ("Expected type `" ^ string_of_type t2
+               ^ "' but found type `" ^ string_of_type t1 ^ "'.");
+         t2
 
 let got_type
    (context: context)
+   (loc: Lexing.position)
    (t: ttype): ttype
 =
    match context.tc_expected with
       | None -> t
-      | Some t2 -> coerce context t t2
+      | Some t2 -> coerce context loc t t2
 
 let rec type_check_expr
    (context: context)
    (expr: expr): ttype
 = match expr with
-   | Boolean_literal(_,b) ->
-      got_type context Boolean_type
-   | Integer_literal(_,i) ->
-      got_type context Integer_type
+   | Boolean_literal(loc,b) ->
+      got_type context loc Boolean_type
+   | Integer_literal(loc,i) ->
+      got_type context loc Integer_type
    | Var_v(loc,x) ->
       begin match x.ver_type with
          | None ->
@@ -216,14 +216,15 @@ let rec type_check_expr
                   ^ " might not be initialised yet.");
             raise Type_error
          | Some t ->
-            got_type context t
+            got_type context loc t
       end
    | Comparison(op, lhs, rhs) ->
+      let loc = loc_of_expression lhs in
       let operand_context = {context with tc_expected = None} in
       let lhs_t = type_check_expr operand_context lhs in
       let rhs_t = type_check_expr operand_context rhs in
-      ignore (coerce context lhs_t rhs_t);
-      got_type context Boolean_type
+      ignore (coerce context loc lhs_t rhs_t);
+      got_type context loc Boolean_type
 
 let rec bind_pre_post_condition (post: bool) e =
    let r = bind_pre_post_condition post in
@@ -292,7 +293,9 @@ let rec type_check
             match param.sym_info with
                | Parameter_sym((Out_parameter | In_out_parameter), t) ->
                   let src_version = Symbols.Maps.find param ret.ret_versions in
-                  ignore (coerce context (unsome src_version.ver_type) t);
+                  ignore
+                     (coerce context ret.ret_location
+                        (unsome src_version.ver_type) t);
                   postconditions :=
                      List.map (subst param (Var_v(ret.ret_location, src_version)))
                         !postconditions;
@@ -304,7 +307,7 @@ let rec type_check
                constr
          ) !postconditions
       end;
-      got_type context Unit_type
+      got_type context ret.ret_location Unit_type
    | Assignment_term(loc, dest, src, tail) ->
       let src_type =
          type_check_expr
@@ -360,7 +363,7 @@ let rec type_check
                report_liveness_origin x origin;
                raise Type_error
             in
-            ignore (coerce context
+            ignore (coerce context jmp.jmp_location
                (unsome source_version.ver_type)
                (unsome target.ver_type));
             preconditions :=
