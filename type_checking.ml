@@ -173,14 +173,12 @@ let got_type
 
 let rec type_check_expr
    (context: context)
-   (expr: expr): expr * ttype
+   (expr: expr): ttype
 = match expr with
    | Boolean_literal(b) ->
-      let t = got_type context Boolean_type in
-      Boolean_literal(b), t
+      got_type context Boolean_type
    | Integer_literal(i) ->
-      let t = got_type context Integer_type in
-      Integer_literal(i), t
+      got_type context Integer_type
    | Var_v(loc,x) ->
       begin match x.ver_type with
          | None ->
@@ -189,15 +187,14 @@ let rec type_check_expr
                   ^ " might not be initialised yet.");
             raise Type_error
          | Some t ->
-            Var_v(loc, x), (got_type context t)
+            got_type context t
       end
    | Comparison(op, lhs, rhs) ->
       let operand_context = {context with tc_expected = None} in
-      let lhs, lhs_t = type_check_expr operand_context lhs in
-      let rhs, rhs_t = type_check_expr operand_context rhs in
-      let _ = coerce context lhs_t rhs_t in
-      let result_t = got_type context Boolean_type in
-      (Comparison(op, lhs, rhs), result_t)
+      let lhs_t = type_check_expr operand_context lhs in
+      let rhs_t = type_check_expr operand_context rhs in
+      ignore (coerce context lhs_t rhs_t);
+      got_type context Boolean_type
 
 let assign_to_lvalue
    (context: context)
@@ -214,7 +211,7 @@ let rec type_check
    | Null_term(loc) ->
       got_type context Unit_type
    | Assignment_term(loc, dest, src, tail) ->
-      let src, src_type =
+      let src_type =
          type_check_expr
             {context with tc_expected = None}
             src
@@ -228,12 +225,10 @@ let rec type_check
                   :: context.tc_facts}
          tail
    | If_term(loc, condition, true_part, false_part) ->
-      let condition, condition_type =
-         type_check_expr
-            {context with
-               tc_expected = Some Boolean_type}
-            condition
-      in
+      ignore (type_check_expr
+         {context with
+            tc_expected = Some Boolean_type}
+         condition);
       let true_part_type =
          type_check
             state
@@ -297,35 +292,35 @@ let rec type_check
                   begin match parameter_sym.sym_info with Parameter_sym(mode, param_type) ->
                      begin match mode with
                         | Const_parameter | In_parameter ->
-                           let arg, arg_t = type_check_expr
+                           let arg_t = type_check_expr
                               {input_context with tc_expected = Some param_type} arg_in
                            in
                            ignore arg_t;
                            preconditions := List.map
-                              (subst parameter_sym arg) !preconditions;
-                           parameters.(i) <- (parameter_sym, Some arg);
+                              (subst parameter_sym arg_in) !preconditions;
+                           parameters.(i) <- (parameter_sym, Some arg_in);
                            output_context :=
                               {!output_context with
                                  tc_facts =
-                                    Comparison(EQ, arg, arg_out)
+                                    Comparison(EQ, arg_in, arg_out)
                                        :: (!output_context).tc_facts}
                         | Out_parameter ->
-                           let arg, arg_t = type_check_expr
+                           let arg_t = type_check_expr
                               {input_context with tc_expected = None} arg_in
                            in
                            ignore arg_t;
-                           parameters.(i) <- (parameter_sym, Some arg);
+                           parameters.(i) <- (parameter_sym, Some arg_in);
                            assign_to_lvalue !output_context arg_out param_type;
                            postconditions := List.map
                               (subst parameter_sym arg_out) !postconditions
                         | In_out_parameter ->
-                           let arg, arg_t = type_check_expr
+                           let arg_t = type_check_expr
                               {input_context with tc_expected = Some param_type} arg_in
                            in
                            ignore arg_t;
                            preconditions := List.map
-                              (subst parameter_sym arg) !preconditions;
-                           parameters.(i) <- (parameter_sym, Some arg);
+                              (subst parameter_sym arg_in) !preconditions;
+                           parameters.(i) <- (parameter_sym, Some arg_in);
                            assign_to_lvalue !output_context arg_out param_type;
                            postconditions := List.map
                               (subst parameter_sym arg_out) !postconditions
@@ -388,11 +383,9 @@ let rec type_check
             tail
       end
    | Static_assert_term(loc, expr, tail) ->
-      let expr, expr_t =
-         type_check_expr
-            {context with tc_expected = Some Boolean_type}
-            expr
-      in
+      ignore (type_check_expr
+         {context with tc_expected = Some Boolean_type}
+         expr);
       prove state context loc expr;
       type_check state context tail
 
