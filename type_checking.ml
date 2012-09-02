@@ -106,6 +106,11 @@ let prove
    (loc: Lexing.position)
    (to_prove: expr): unit
 =
+   prerr_endline ("Proving "
+      ^ string_of_expr to_prove
+      ^ " under assumptions "
+      ^ String.concat " and "
+         (List.map string_of_expr context.tc_facts));
    let facts = List.map normalise context.tc_facts in
    let e = normalise to_prove in
    if List.exists (expressions_match e) facts then
@@ -295,15 +300,17 @@ let rec type_check
                            let arg_t = type_check_expr
                               {input_context with tc_expected = Some param_type} arg_in
                            in
-                           ignore arg_t;
                            preconditions := List.map
                               (subst parameter_sym arg_in) !preconditions;
                            parameters.(i) <- (parameter_sym, Some arg_in);
+                           assign_to_lvalue !output_context arg_out arg_t;
                            output_context :=
                               {!output_context with
                                  tc_facts =
                                     Comparison(EQ, arg_in, arg_out)
-                                       :: (!output_context).tc_facts}
+                                       :: (!output_context).tc_facts};
+                           postconditions := List.map
+                              (subst parameter_sym arg_in) !postconditions
                         | Out_parameter ->
                            let arg_t = type_check_expr
                               {input_context with tc_expected = None} arg_in
@@ -377,6 +384,9 @@ let rec type_check
                in loop [] (Array.length parameters)
             end;
          (* Continue, assuming the postconditions. *)
+         prerr_endline ("Postconditions after call: "
+            ^ String.concat " and "
+               (List.map string_of_expr !postconditions));
          type_check state
             {!output_context with
                tc_facts = !postconditions @ (!output_context).tc_facts}
