@@ -19,8 +19,15 @@ type liveness_origin =
    | Used_variable of Lexing.position
    | From_parameters
 
+(* Reason why a constraint must be solved. *)
+type constraint_origin =
+   | From_postconditions of Lexing.position * symbol (* subprogram symbol *)
+   | From_preconditions of Lexing.position * symbol (* subprogram symbol *)
+   | From_static_assertion of Lexing.position
+
 type iterm =
-   | Null_term of loc
+   (* XXX: constraint_origin in Null_term contains a lot of redundant information. *)
+   | Null_term of loc * (constraint_origin * expr) list   (* postconditions *)
    | Assignment_term of loc * expr       (* destination (L-value) *)
                             * expr       (* source *)
                             * iterm      (* continuation *)
@@ -73,11 +80,14 @@ and block =
          Analogous to the variables that are
          live when entering the block. *)
       mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
-      mutable bl_preconditions: expr list;
+      mutable bl_preconditions: (constraint_origin * expr) list;
    }
 
 val new_block_id: unit -> int
 val dump_blocks: formatter -> block list -> unit
+
+val loc_of_constraint_origin : constraint_origin -> Lexing.position
+val describe_constraint_origin : constraint_origin -> string
 
 (* Calculate bl_free. This is essentially liveness analysis. *)
 val calculate_free_names: block list -> unit

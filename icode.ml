@@ -14,8 +14,13 @@ type liveness_origin =
    | Used_variable of Lexing.position
    | From_parameters
 
+type constraint_origin =
+   | From_postconditions of Lexing.position * symbol
+   | From_preconditions of Lexing.position * symbol
+   | From_static_assertion of Lexing.position
+
 type iterm =
-   | Null_term of loc
+   | Null_term of loc * (constraint_origin * expr) list
    | Assignment_term of loc * expr * expr * iterm
    | If_term of loc * expr * iterm * iterm
    | Jump_term of jump_info
@@ -46,7 +51,7 @@ and block =
       bl_statement            : Parse_tree.statement;
       mutable bl_body         : iterm option;
       mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
-      mutable bl_preconditions: expr list;
+      mutable bl_preconditions: (constraint_origin * expr) list;
    }
 
 let rec dump_term (f: formatter) = function
@@ -106,7 +111,7 @@ let dump_block (f: formatter) (bl: block) =
                break f
             ) bl.bl_in
          end;
-         List.iter (fun p ->
+         List.iter (fun (_, p) ->
             puts f ("| "
                ^ string_of_expr p);
             break f
@@ -123,6 +128,19 @@ let map_minus_set
    (b: Symbols.Sets.t): 'a Symbols.Maps.t
 =
    Symbols.Sets.fold Symbols.Maps.remove b a
+
+let loc_of_constraint_origin = function
+   | From_postconditions(loc, _)
+   | From_preconditions(loc, _)
+   | From_static_assertion(loc) -> loc
+
+let describe_constraint_origin = function
+   | From_postconditions(_, sub) ->
+      "a postcondition of " ^ describe_symbol sub
+   | From_preconditions(_, sub) ->
+      "a precondition of calling " ^ describe_symbol sub
+   | From_static_assertion(_) ->
+      "a static assertion"
 
 let equal_keys a b =
    let rec compare = function
@@ -162,7 +180,10 @@ let rec bind_versions_expr context e =
 
 let rec bind_versions context iterm =
    match iterm with
-      | Null_term _ -> iterm
+      | Null_term(loc, constr) ->
+         Null_term(loc,
+            List.map (fun (origin, constr) ->
+               (origin, bind_versions_expr context constr)) constr)
       | Assignment_term(loc, dest, src, tail) ->
          let src = bind_versions_expr context src in
          let context = bind_versions_lvalue context dest in
@@ -226,7 +247,11 @@ let calculate_free_names (blocks: block list): unit =
          (bound: Symbols.Sets.t):
          iterm -> (liveness_origin * symbol_v) Symbols.Maps.t
       = function
-         | Null_term _ | Inspect_type_term _ -> free
+         | Null_term(_,constr) ->
+            List.fold_left
+               (fun free (_, constr) -> esearch free bound constr)
+               free constr
+         | Inspect_type_term _ -> free
          | Assignment_term(_,dest,src,p) ->
             let free, bound = esearch_lvalue free bound dest in
             search (esearch free bound src) bound p

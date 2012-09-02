@@ -21,7 +21,7 @@ type context = {
 
 type state = {
    (* List of unsolved constraints. *)
-   mutable ts_unsolved  : (Lexing.position * expr) list;
+   mutable ts_unsolved  : (constraint_origin * expr) list;
 }
 
 exception Type_error
@@ -120,7 +120,7 @@ let elim_equals facts e =
 let prove
    (state: state)
    (context: context)
-   (loc: Lexing.position)
+   (origin: constraint_origin)
    (to_prove: expr): unit
 =
    prerr_endline ("Proving "
@@ -153,7 +153,7 @@ let prove
             Fm_solver.solve inequalities;
             (* Solving succeeded: the inequalities were satisfiable.
                The original constraint was not proved. *)
-            state.ts_unsolved <- (loc, to_prove) :: state.ts_unsolved
+            state.ts_unsolved <- (origin, to_prove) :: state.ts_unsolved
          with Fm_solver.Contradiction -> ()
 
 let rec coerce context t1 t2: ttype =
@@ -233,7 +233,11 @@ let rec type_check
    (context: context)
    (iterm: iterm): ttype
 = match iterm with
-   | Null_term(loc) ->
+   | Null_term(loc, constr) ->
+      List.iter
+         (fun (origin, constr) ->
+            (prove state context origin constr))
+         constr;
       got_type context Unit_type
    | Assignment_term(loc, dest, src, tail) ->
       let src_type =
@@ -293,11 +297,18 @@ let rec type_check
             ignore t;
             preconditions :=
                List.map
-                  (substv target (Var_v(jmp.jmp_location, source_version)))
+                  (fun (origin, constr) ->
+                     (origin,
+                      substv target
+                        (Var_v(jmp.jmp_location, source_version))
+                        constr))
                   !preconditions
          with Type_error -> ()
       ) jmp.jmp_target.bl_in;
-      List.iter (prove state context jmp.jmp_location) !preconditions;
+      List.iter
+         (fun (origin, constr) ->
+            prove state context origin constr)
+         !preconditions;
       Unit_type
    | Call_term(call, tail) ->
       begin match call.call_target.sym_info with
@@ -344,7 +355,7 @@ let rec type_check
                               | Some arg_out -> arg_out
                               | None ->
                                  Errors.semantic_error
-                                    (get_loc_of_expression arg_in)
+                                    (loc_of_expression arg_in)
                                     ("Argument for `out' parameter `"
                                        ^ full_name parameter_sym
                                        ^ "' must be a variable.");
@@ -363,7 +374,7 @@ let rec type_check
                               | Some arg_out -> arg_out
                               | None ->
                                  Errors.semantic_error
-                                    (get_loc_of_expression arg_in)
+                                    (loc_of_expression arg_in)
                                     ("Argument for `in out' parameter `"
                                        ^ full_name parameter_sym
                                        ^ "' must be a variable.");
@@ -420,7 +431,10 @@ let rec type_check
          ) parameters;
          (* Prove that this subprogram's preconditions can be met, assuming
             the facts we know. *)
-         List.iter (prove state input_context call.call_location) !preconditions;
+         List.iter
+            (prove state input_context
+               (From_preconditions(call.call_location, call.call_target)))
+            !preconditions;
          (* Store the argument binding for later translation stages. *)
          call.call_bound_arguments <-
             begin
@@ -444,7 +458,7 @@ let rec type_check
       ignore (type_check_expr
          {context with tc_expected = Some Boolean_type}
          expr);
-      prove state context loc expr;
+      prove state context (From_static_assertion loc) expr;
       type_check state context tail
 
 let merge_types t1 t2 =
@@ -480,8 +494,13 @@ let resolve_unknowns
 =
    Symbols.Maps.map
       (fun (origin, x) ->
-         x.ver_type <-
-            Some (resolve_unknowns_in_type changed (unsome x.ver_type));
+         begin try
+            x.ver_type <-
+               Some (resolve_unknowns_in_type changed (unsome x.ver_type))
+         with Failure "resolve_unknowns_in_type" ->
+            raise (Failure ("resolve_unknowns_in_type: "
+               ^ describe_symbol x.ver_symbol))
+         end;
          (origin, x))
       vars
 
@@ -499,7 +518,8 @@ let type_check_blocks
             | Variable_sym when block == entry_point ->
                (* Free at start of subprogram -> uninitialised. *)
                assert (match xv.ver_type with None -> true | Some _ -> false)
-            | Parameter_sym((Const_parameter | In_parameter | In_out_parameter), _)
+            | Parameter_sym((Const_parameter | In_parameter | In_out_parameter), t) ->
+               xv.ver_type <- Some t
             | Variable_sym ->
                xv.ver_type <- Some (Unknown_type
                   {unk_incoming = [];
@@ -518,7 +538,7 @@ let type_check_blocks
          let context = {
             tc_pass = if !first_pass then Guessing_pass else Checking_pass;
             tc_expected = Some Unit_type;
-            tc_facts = block.bl_preconditions;
+            tc_facts = List.map snd block.bl_preconditions;
          } in
          let t = type_check state context (unsome block.bl_body) in
          ignore t;
@@ -535,13 +555,18 @@ let type_check_blocks
                ) blocks
             done
          end else begin
-            List.iter (fun (loc, constr) ->
+            List.iter (fun (origin, constr) ->
                if block == entry_point then begin
-                  Errors.semantic_error loc
+                  Errors.semantic_error
+                     (loc_of_constraint_origin origin)
                      ("Cannot prove `"
-                        ^ string_of_expr constr ^ "'.")
+                        ^ string_of_expr constr ^ "', "
+                        ^ describe_constraint_origin origin ^ ".");
+                  Errors.semantic_error
+                     (loc_of_expression constr)
+                     ("Original constraint was here.")
                end else begin
-                  block.bl_preconditions <- constr :: block.bl_preconditions;
+                  block.bl_preconditions <- (origin, constr) :: block.bl_preconditions;
                   finished := false
                end
             ) state.ts_unsolved

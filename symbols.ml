@@ -69,11 +69,11 @@ end
 module Maps = Map.Make(Ordered)
 module Sets = Set.Make(Ordered)
 
-let rec get_loc_of_expression = function
+let rec loc_of_expression = function
    | Boolean_literal(loc,_) | Integer_literal(loc,_)
    | Var(loc,_) | Var_v(loc,_) -> loc
-   | Negation(e) -> get_loc_of_expression e
-   | Comparison(_,lhs,_) -> get_loc_of_expression lhs
+   | Negation(e) -> loc_of_expression e
+   | Comparison(_,lhs,_) -> loc_of_expression lhs
 
 let root_symbol = {
    sym_id            = 0;

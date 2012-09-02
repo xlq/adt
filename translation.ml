@@ -19,13 +19,13 @@ open Misc
    so catching it silently and continuing translation is OK. *)
 exception Bail_out
 
-type context =
-   {
-      (* Entity that's being translated. *)
-      ctx_scope      : symbol;
-      (* Block to "jump" to after current block. *)
-      ctx_after      : block option;
-   }
+type after =
+   (* Block to jump to after current block. *)
+   | Continue_with of block
+   (* Return_with(sub, constr)
+      Return from subprogram sub: the postconditions constr
+      must be met. *)
+   | Return_with of symbol * expr list
 
 type state =
    {
@@ -50,7 +50,7 @@ let get_loc_of_expression = function
    | Parse_tree.Name(loc,_) -> loc
 
 let rec translate_type
-   (context: context)
+   (scope: symbol)
    (typ: Parse_tree.ttype): ttype
 = match typ with
    | Parse_tree.Named_type(loc, ["Boolean"]) ->
@@ -63,12 +63,12 @@ let rec translate_type
       raise Bail_out
 
 let rec translate_expr
-   (context: context)
+   (scope: symbol)
    (expression: Parse_tree.expr): expr
 =
    match expression with
       | Parse_tree.Name(loc, [name]) ->
-         let sym = Symbols.find_variable context.ctx_scope name in
+         let sym = Symbols.find_variable scope name in
          begin match sym.sym_info with
             | Variable_sym -> Var(loc, sym)
             | Parameter_sym(mode, declared_type) -> Var(loc, sym)
@@ -82,16 +82,16 @@ let rec translate_expr
       | Parse_tree.Integer_literal(loc, i) -> Integer_literal(loc, i)
       | Parse_tree.Comparison(loc, op, lhs, rhs) ->
          Comparison(op,
-            translate_expr context lhs,
-            translate_expr context rhs)
+            translate_expr scope lhs,
+            translate_expr scope rhs)
 
 let translate_lvalue
-   (context: context)
+   (scope: symbol)
    (expression: Parse_tree.expr): symbol
 =
    match expression with
       | Parse_tree.Name(loc, [name]) ->
-         let sym = Symbols.find_variable context.ctx_scope name in
+         let sym = Symbols.find_variable scope name in
          begin match sym.sym_info with
             | Variable_sym -> sym
             | _ ->
@@ -126,7 +126,6 @@ let make_jump
    block corresponding to the translated statement. *)
 let make_block
    (state: state)
-   (context: context)
    (statement: Parse_tree.statement)
    (translate: block -> iterm): block
 =
@@ -152,19 +151,25 @@ let interpret_as_lvalue = function
 
 let rec translate_statement
    (state: state)
-   (context: context)
+   (scope: symbol)
+   (after: after)
    (statement: Parse_tree.statement): iterm
 =
    match statement with
       | Parse_tree.No_statement(loc) | Parse_tree.Null_statement(loc) ->
-         begin match context.ctx_after with
-            | None ->
-               Null_term(loc)
-            | Some cont ->
+         begin match after with
+            | Return_with(sub, constraints) ->
+               Null_term(
+                  loc,
+                  List.map
+                     (fun constr ->
+                        (From_postconditions(loc, sub), constr))
+                     constraints)
+            | Continue_with cont ->
                make_jump loc cont
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
-         let dest = translate_expr context dest in
+         let dest = translate_expr scope dest in
          let dest = match interpret_as_lvalue dest with
             | Some dest -> dest
             | None ->
@@ -172,33 +177,30 @@ let rec translate_statement
                   ("Cannot assign to `" ^ string_of_expr dest ^ "'.");
                raise Bail_out
          in
-         let src = translate_expr context src in
-         let cont = translate_statement state context cont in
+         let src = translate_expr scope src in
+         let cont = translate_statement state scope after cont in
          Assignment_term(loc, dest, src, cont)
       | Parse_tree.If_statement(loc, condition, true_part, false_part, cont) ->
-         let cont = translate_block state context cont in
+         let cont = translate_block state scope after cont in
          If_term(loc,
-            translate_expr context condition,
-            translate_statement state
-               {context with ctx_after = Some cont} true_part,
-            translate_statement state
-               {context with ctx_after = Some cont} false_part)
+            translate_expr scope condition,
+            translate_statement state scope (Continue_with cont) true_part,
+            translate_statement state scope (Continue_with cont) false_part)
       | Parse_tree.While_loop(loc, condition, body, cont) ->
          (* XXX: If we're at the start of a block, make_block will do nothing! *)
          let condition_block =
-            make_block state context statement
+            make_block state statement
                (fun loop_start ->
                   If_term(loc,
-                     translate_expr context condition,
-                     translate_statement state
-                        {context with ctx_after = Some loop_start}
-                        body,
-                     translate_statement state context cont))
+                     translate_expr scope condition,
+                     translate_statement state scope
+                        (Continue_with loop_start) body,
+                     translate_statement state scope after cont))
          in
          (*condition_block.bl_free <- !annotations;*)
          make_jump loc condition_block
       | Parse_tree.Subprogram_call(loc, [name], (positional_args, named_args), tail) ->
-         begin match Symbols.find context.ctx_scope name with
+         begin match Symbols.find scope name with
          | None ->
             Errors.semantic_error loc ("`" ^ name ^ "' is undefined.");
             raise Bail_out
@@ -207,13 +209,13 @@ let rec translate_statement
             | Subprogram_sym(subprogram_info) ->
                let positional_args = List.map
                   (fun arg ->
-                     let arg = translate_expr context arg in
+                     let arg = translate_expr scope arg in
                      (arg, interpret_as_lvalue arg))
                   positional_args
                in
                let named_args = List.map
                   (fun (name, arg) ->
-                     let arg = translate_expr context arg in
+                     let arg = translate_expr scope arg in
                      (name, (arg, interpret_as_lvalue arg)))
                   named_args
                in
@@ -223,7 +225,7 @@ let rec translate_statement
                    call_arguments   = (positional_args, named_args);
                    call_bound_arguments = [];
                   },
-                  translate_statement state context tail)
+                  translate_statement state scope after tail)
             | _ ->
                Errors.semantic_error loc
                   ("Subprogram expected but "
@@ -233,28 +235,29 @@ let rec translate_statement
             end
          end
       | Parse_tree.Inspect_type(loc,[x],tail) ->
-         let sym = Symbols.find_variable context.ctx_scope x in
+         let sym = Symbols.find_variable scope x in
          begin match sym.sym_info with
             | Variable_sym | Parameter_sym(_) -> 
                Inspect_type_term(loc, sym,
-                  translate_statement state context tail)
+                  translate_statement state scope after tail)
             | _ ->
                (* ignore it *)
-               translate_statement state context tail
+               translate_statement state scope after tail
          end
       | Parse_tree.Static_assert(loc,expr,tail) ->
          Static_assert_term(loc,
-            translate_expr context expr,
-            translate_statement state context tail)
+            translate_expr scope expr,
+            translate_statement state scope after tail)
 
 and translate_block
    (state: state)
-   (context: context)
+   (scope: symbol)
+   (after: after)
    (statement: Parse_tree.statement):
    block
 =
-   make_block state context statement
-      (fun _ -> translate_statement state context statement)
+   make_block state statement
+      (fun _ -> translate_statement state scope after statement)
 
 (* Make a sym -> type map of a subprogram's parameters. *)
 let parameters_of_subprogram sym =
@@ -268,7 +271,7 @@ let parameters_of_subprogram sym =
                result
          ) Symbols.Maps.empty subprogram_info.sub_parameters
 
-let translate_subprogram_prototype state context sub =
+let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
    let subprogram_info = {
       sub_parameters = [];
@@ -277,7 +280,7 @@ let translate_subprogram_prototype state context sub =
    } in
    let subprogram_sym =
       try
-         new_symbol context.ctx_scope name
+         new_symbol scope name
             (Subprogram_sym subprogram_info)
       with Already_defined sym ->
          Errors.semantic_error sub.Parse_tree.sub_location
@@ -285,19 +288,13 @@ let translate_subprogram_prototype state context sub =
                ^ describe_symbol sym ^ ".");
          raise Bail_out
    in
-   let context = {(*context with*)
-      ctx_scope = subprogram_sym;
-      ctx_after = None;
-   } in
+   let scope = subprogram_sym in
    (* Translate parameters. *)
    subprogram_info.sub_parameters <-
       List.fold_right
          (fun param parameters ->
             try
-               match Symbols.find_in
-                  context.ctx_scope
-                  param.Parse_tree.param_name
-               with
+               match Symbols.find_in scope param.Parse_tree.param_name with
                      | Some _ ->
                         Errors.semantic_error sub.Parse_tree.sub_location
                            ("Parameter `" ^ param.Parse_tree.param_name
@@ -310,8 +307,7 @@ let translate_subprogram_prototype state context sub =
                            Unfinished_sym
                         in
                         let t = translate_type
-                           context 
-                           param.Parse_tree.param_type
+                           scope param.Parse_tree.param_type
                         in
                         sym.sym_info <- Parameter_sym(param.Parse_tree.param_mode, t);
                         sym :: parameters
@@ -320,7 +316,7 @@ let translate_subprogram_prototype state context sub =
    (* Translate constraints. *)
    let (pre, post) =
       List.fold_left (fun (pre, post) constr ->
-         let e = translate_expr context constr.Parse_tree.constr_expr in
+         let e = translate_expr scope constr.Parse_tree.constr_expr in
          match constr.Parse_tree.constr_mode with
             | Const_parameter | In_parameter -> (e::pre, post)
             | Out_parameter -> (pre, e::post)
@@ -338,16 +334,20 @@ let translate_subprogram_body compiler state subprogram_sym sub =
       | Subprogram_sym(info) -> info
    in
    let parameters = parameters_of_subprogram subprogram_sym in
-   let context = {
-      ctx_scope = subprogram_sym;
-      ctx_after = None;
-   } in
+   let scope = subprogram_sym in
    assert (match state.st_blocks with [] -> true | _ -> false);
    let entry_point =
-      translate_block state context
+      translate_block state scope
+         (Return_with(subprogram_sym, subprogram_info.sub_postconditions))
          sub.Parse_tree.sub_body
    in
-   entry_point.bl_preconditions <- subprogram_info.sub_preconditions;
+   entry_point.bl_preconditions <- List.map
+      (fun precondition ->
+         (From_preconditions(
+            Symbols.loc_of_expression precondition,
+            subprogram_sym),
+          precondition))
+      subprogram_info.sub_preconditions;
    calculate_free_names state.st_blocks;
    Type_checking.type_check_blocks
       state.st_blocks
@@ -356,12 +356,12 @@ let translate_subprogram_body compiler state subprogram_sym sub =
    Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
    state.st_blocks <- []
 
-let translate_declarations state context declarations =
+let translate_declarations state scope declarations =
    List.iter (fun declaration ->
       try
          match declaration with
             | Parse_tree.Subprogram(sub) ->
-               translate_subprogram_prototype state context sub
+               translate_subprogram_prototype state scope sub
       with Bail_out -> ()
    ) declarations
 
@@ -377,13 +377,7 @@ let finish_translation compiler state =
 let translate_package compiler state pkg =
    match pkg.Parse_tree.pkg_name with [name] ->
    let package_sym = new_symbol root_symbol name Package_sym in
-   let context =
-      {
-         ctx_scope      = package_sym;
-         ctx_after      = None;
-      }
-   in
-   translate_declarations state context
+   translate_declarations state package_sym
       pkg.Parse_tree.pkg_declarations;
    finish_translation compiler state
 
@@ -394,11 +388,7 @@ let translate compiler translation_unit =
    } in
    match translation_unit with
       | Parse_tree.Subprogram_unit sub ->
-         let context = {
-            ctx_scope      = root_symbol;
-            ctx_after      = None;
-         } in
-         translate_subprogram_prototype state context sub;
+         translate_subprogram_prototype state root_symbol sub;
          finish_translation compiler state
       | Parse_tree.Package_unit pkg ->
          translate_package compiler state pkg

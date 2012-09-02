@@ -76,7 +76,7 @@ exception Already_defined of symbol
 module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol
 
-val get_loc_of_expression : expr -> Lexing.position
+val loc_of_expression : expr -> Lexing.position
 val root_symbol : symbol
 val dotted_name : symbol -> string list
 val full_name : symbol -> string
