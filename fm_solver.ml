@@ -166,6 +166,15 @@ let elim_const = function
       None
    | x -> Some x
 
+let elim_const_list l =
+   let rec loop result = function
+      | [] -> result
+      | x::l ->
+         match elim_const x with
+            | None -> loop result l
+            | Some x -> loop (x::result) l
+   in loop [] l
+
 (*****  Multiply a sum by a constant  *****
  *
  *  ax + by + ... + cz + m >= 0
@@ -241,7 +250,7 @@ let eliminate x inequalities =
 
 let solve inequalities =
    dump "Solving linear inequalities:" inequalities;
-   let system = ref inequalities in
+   let system = ref (elim_const_list inequalities) in
    let vars = free_ineqs !system in
    List.iter (fun x ->
       match eliminate x !system with
