@@ -22,8 +22,8 @@ and unknown = {
 }
 
 and expr =
-   | Boolean_literal of bool
-   | Integer_literal of big_int
+   | Boolean_literal of Lexing.position * bool
+   | Integer_literal of Lexing.position * big_int
    | Var of Lexing.position * symbol
    | Var_v of Lexing.position * symbol_v
    | Negation of expr
@@ -69,6 +69,12 @@ end
 module Maps = Map.Make(Ordered)
 module Sets = Set.Make(Ordered)
 
+let rec get_loc_of_expression = function
+   | Boolean_literal(loc,_) | Integer_literal(loc,_)
+   | Var(loc,_) | Var_v(loc,_) -> loc
+   | Negation(e) -> get_loc_of_expression e
+   | Comparison(_,lhs,_) -> get_loc_of_expression lhs
+
 let root_symbol = {
    sym_id            = 0;
    sym_name          = "Standard";
@@ -99,9 +105,9 @@ let string_of_op = function
    | GE -> ">="
 
 let rec string_of_expr = function
-   | Boolean_literal true -> "True"
-   | Boolean_literal false -> "False"
-   | Integer_literal i -> string_of_big_int i
+   | Boolean_literal(_,true) -> "True"
+   | Boolean_literal(_,false) -> "False"
+   | Integer_literal(_,i) -> string_of_big_int i
    | Var(_,sym) -> full_name sym
    | Var_v(_,sym_v) -> full_name_v sym_v
    | Negation(m) -> "not (" ^ string_of_expr m ^ ")"

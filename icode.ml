@@ -34,7 +34,8 @@ and call_info =
    {
       call_location   : loc;
       call_target     : symbol;
-      call_arguments  : (expr * expr) list * (string * (expr * expr)) list;
+      call_arguments  : (expr * expr option) list
+                      * (string * (expr * expr option)) list;
       mutable call_bound_arguments
                       : expr list;
    }
@@ -70,12 +71,16 @@ let rec dump_term (f: formatter) = function
             (List.map
                (fun (arg_in, arg_out) ->
                   "in " ^ string_of_expr arg_in
-                     ^ " out " ^ string_of_expr arg_out)
+                     ^ match arg_out with
+                        | Some arg_out -> " out " ^ string_of_expr arg_out
+                        | None -> "")
                positional_args
              @ List.map
                (fun (name, (arg_in, arg_out)) ->
                   name ^ " => in " ^ string_of_expr arg_in
-                     ^ " out " ^ string_of_expr arg_out)
+                     ^ match arg_out with
+                        | Some arg_out -> " out " ^ string_of_expr arg_out
+                        | None -> "")
                named_args)
          ^ ");");
       break f;
@@ -191,13 +196,17 @@ let rec bind_versions context iterm =
          let context =
             List.fold_left
                (fun context (arg_in, arg_out) ->
-                  bind_versions_lvalue context arg_out)
+                  match arg_out with
+                     | Some arg_out -> bind_versions_lvalue context arg_out
+                     | None -> context)
                context positional_args
          in
          let context =
             List.fold_left
                (fun context (name, (arg_in, arg_out)) ->
-                  bind_versions_lvalue context arg_out)
+                  match arg_out with
+                     | Some arg_out -> bind_versions_lvalue context arg_out
+                     | None -> context)
                context named_args
          in
          Call_term(
@@ -249,13 +258,17 @@ let calculate_free_names (blocks: block list): unit =
             let free, bound =
                List.fold_left
                   (fun (free, bound) (arg_in, arg_out) ->
-                     esearch_lvalue free bound arg_out)
+                     match arg_out with
+                        | Some arg_out -> esearch_lvalue free bound arg_out
+                        | None -> (free, bound))
                   (free, bound) pos_args
             in
             let free, bound =
                List.fold_left
                   (fun (free, bound) (name, (arg_in, arg_out)) ->
-                     esearch_lvalue free bound arg_out)
+                     match arg_out with
+                        | Some arg_out -> esearch_lvalue free bound arg_out
+                        | None -> (free, bound))
                   (free, bound) named_args
             in
             search free bound tail

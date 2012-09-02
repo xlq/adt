@@ -54,9 +54,9 @@ let paren prec (sprec, s) =
 
 (* The numbers are precedences to avoid generating excessive parentheses. *)
 let rec translate_expr context = function
-   | Boolean_literal(true) -> 100, "true"
-   | Boolean_literal(false) -> 100, "false"
-   | Integer_literal(i) -> 100, string_of_big_int i
+   | Boolean_literal(_,true) -> 100, "true"
+   | Boolean_literal(_,false) -> 100, "false"
+   | Integer_literal(_,i) -> 100, string_of_big_int i
    | Var_v(_,x) ->
       begin match x.ver_symbol.sym_info with
          | Parameter_sym((Const_parameter | In_parameter), _)

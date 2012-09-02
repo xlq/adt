@@ -21,7 +21,7 @@ type liveness_origin =
 
 type iterm =
    | Null_term of loc
-   | Assignment_term of loc * expr       (* destination *)
+   | Assignment_term of loc * expr       (* destination (L-value) *)
                             * expr       (* source *)
                             * iterm      (* continuation *)
    | If_term of loc * expr  (* condition *)
@@ -51,8 +51,9 @@ and call_info =
       (* Each argument has a pair of expressions (in, out):
          'in' contains the versions to be passed to the subprogram, while
          'out' contains new versions, for values to be received from the
-         subprogram (in the case of Out_parameter or In_out_parameter). *)
-      call_arguments  : (expr * expr) list * (string * (expr * expr)) list;
+         subprogram (in the case of Out_parameter or In_out_parameter).
+         If the argument was not a valid L-value, out is None. *)
+      call_arguments  : (expr * expr option) list * (string * (expr * expr option)) list;
       (* call_bound_arguments is set once the target subprogram has been
          chosen. The list is in the same order as the target's parameters. *)
       mutable call_bound_arguments

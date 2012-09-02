@@ -61,7 +61,7 @@ let rec substv x replacement expr =
       | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
 
 let negate = function
-   | Boolean_literal(b) -> Some(Boolean_literal(not b))
+   | Boolean_literal(loc,b) -> Some(Boolean_literal(loc,not b))
    | Integer_literal _ | Var _ | Var_v _ -> None
    | Comparison(op, lhs, rhs) ->
       Some(Comparison(
@@ -86,8 +86,8 @@ let rec normalise (e: expr) =
 
 let rec expressions_match m n =
    match m, n with
-      | Boolean_literal(b), Boolean_literal(b') -> b = b'
-      | Integer_literal(i), Integer_literal(i') -> eq_big_int i i'
+      | Boolean_literal(_,b), Boolean_literal(_,b') -> b = b'
+      | Integer_literal(_,i), Integer_literal(_,i') -> eq_big_int i i'
       | Var_v(_,x), Var_v(_,x') -> x == x'
       | Negation(x), Negation(x') -> expressions_match x x'
       | Comparison(op, lhs, rhs), Comparison(op', lhs', rhs') ->
@@ -200,9 +200,9 @@ let rec type_check_expr
    (context: context)
    (expr: expr): ttype
 = match expr with
-   | Boolean_literal(b) ->
+   | Boolean_literal(_,b) ->
       got_type context Boolean_type
-   | Integer_literal(i) ->
+   | Integer_literal(_,i) ->
       got_type context Integer_type
    | Var_v(loc,x) ->
       begin match x.ver_type with
@@ -323,15 +323,33 @@ let rec type_check
                            preconditions := List.map
                               (subst parameter_sym arg_in) !preconditions;
                            parameters.(i) <- (parameter_sym, Some arg_in);
-                           assign_to_lvalue !output_context arg_out arg_t;
-                           output_context :=
-                              {!output_context with
-                                 tc_facts =
-                                    Comparison(EQ, arg_in, arg_out)
-                                       :: (!output_context).tc_facts};
+                           begin match arg_out with
+                              | Some arg_out ->
+                                 (* The argument was a valid L-value but was not
+                                    matched to an "in" or "in out" parameter.
+                                    Set the type of arg_out and record that
+                                    arg_in and arg_out are equal. *)
+                                 assign_to_lvalue !output_context arg_out arg_t;
+                                 output_context :=
+                                    {!output_context with
+                                       tc_facts =
+                                          Comparison(EQ, arg_in, arg_out)
+                                             :: (!output_context).tc_facts}
+                              | None -> ()
+                           end;
                            postconditions := List.map
                               (subst parameter_sym arg_in) !postconditions
                         | Out_parameter ->
+                           let arg_out = match arg_out with
+                              | Some arg_out -> arg_out
+                              | None ->
+                                 Errors.semantic_error
+                                    (get_loc_of_expression arg_in)
+                                    ("Argument for `out' parameter `"
+                                       ^ full_name parameter_sym
+                                       ^ "' must be a variable.");
+                                 raise Type_error
+                           in
                            let arg_t = type_check_expr
                               {input_context with tc_expected = None} arg_in
                            in
@@ -341,6 +359,16 @@ let rec type_check
                            postconditions := List.map
                               (subst parameter_sym arg_out) !postconditions
                         | In_out_parameter ->
+                           let arg_out = match arg_out with
+                              | Some arg_out -> arg_out
+                              | None ->
+                                 Errors.semantic_error
+                                    (get_loc_of_expression arg_in)
+                                    ("Argument for `in out' parameter `"
+                                       ^ full_name parameter_sym
+                                       ^ "' must be a variable.");
+                                 raise Type_error
+                           in
                            let arg_t = type_check_expr
                               {input_context with tc_expected = Some param_type} arg_in
                            in

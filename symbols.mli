@@ -29,8 +29,8 @@ and unknown = {
 }
 
 and expr =
-   | Boolean_literal of bool
-   | Integer_literal of big_int
+   | Boolean_literal of Lexing.position * bool
+   | Integer_literal of Lexing.position * big_int
    | Var of Lexing.position * symbol
    | Var_v of Lexing.position * symbol_v
    | Negation of expr
@@ -76,6 +76,7 @@ exception Already_defined of symbol
 module Maps    : Map.S with type key = symbol
 module Sets    : Set.S with type elt = symbol
 
+val get_loc_of_expression : expr -> Lexing.position
 val root_symbol : symbol
 val dotted_name : symbol -> string list
 val full_name : symbol -> string

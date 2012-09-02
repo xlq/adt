@@ -78,8 +78,8 @@ let rec translate_expr
                    ^ describe_symbol sym ^ " found.");
                raise Bail_out
          end
-      | Parse_tree.Boolean_literal(loc, b) -> Boolean_literal(b)
-      | Parse_tree.Integer_literal(loc, i) -> Integer_literal(i)
+      | Parse_tree.Boolean_literal(loc, b) -> Boolean_literal(loc, b)
+      | Parse_tree.Integer_literal(loc, i) -> Integer_literal(loc, i)
       | Parse_tree.Comparison(loc, op, lhs, rhs) ->
          Comparison(op,
             translate_expr context lhs,
@@ -147,7 +147,8 @@ let make_block
          new_block
 
 let interpret_as_lvalue = function
-   | Var(loc, x) -> Var_v(loc, new_version x)
+   | Var(loc, x) -> Some (Var_v(loc, new_version x))
+   | _ -> None
 
 let rec translate_statement
    (state: state)
@@ -164,7 +165,13 @@ let rec translate_statement
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
          let dest = translate_expr context dest in
-         let dest = interpret_as_lvalue dest in
+         let dest = match interpret_as_lvalue dest with
+            | Some dest -> dest
+            | None ->
+               Errors.semantic_error loc
+                  ("Cannot assign to `" ^ string_of_expr dest ^ "'.");
+               raise Bail_out
+         in
          let src = translate_expr context src in
          let cont = translate_statement state context cont in
          Assignment_term(loc, dest, src, cont)
