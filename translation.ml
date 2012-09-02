@@ -71,7 +71,7 @@ let rec translate_expr
          let sym = Symbols.find_variable context.ctx_scope name in
          begin match sym.sym_info with
             | Variable_sym -> Var(loc, sym)
-            | Parameter_sym(declared_type) -> Var(loc, sym)
+            | Parameter_sym(mode, declared_type) -> Var(loc, sym)
             | _ ->
                Errors.semantic_error loc
                   ("Expression expected but "
@@ -138,9 +138,8 @@ let make_block
                bl_id             = new_block_id ();
                bl_statement      = statement;
                bl_body           = None;
-               bl_free           = Symbols.Maps.empty;
-               bl_preconditions  = [];
                bl_in             = Symbols.Maps.empty;
+               bl_preconditions  = [];
             }
          in
          state.st_blocks <- new_block :: state.st_blocks;
@@ -164,10 +163,11 @@ let rec translate_statement
                make_jump loc cont
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
-         let dest' = translate_expr context dest in
-         let src' = translate_expr context src in
-         let cont' = translate_statement state context cont in
-         Assignment_term(loc, dest', src', cont')
+         let dest = translate_expr context dest in
+         let dest = interpret_as_lvalue dest in
+         let src = translate_expr context src in
+         let cont = translate_statement state context cont in
+         Assignment_term(loc, dest, src, cont)
       | Parse_tree.If_statement(loc, condition, true_part, false_part, cont) ->
          let cont = translate_block state context cont in
          If_term(loc,
@@ -255,8 +255,8 @@ let parameters_of_subprogram sym =
    | Subprogram_sym(subprogram_info) ->
       List.fold_left (fun result param ->
          match param.sym_info with
-            | Parameter_sym(t) ->
-               Symbols.Maps.add param t result
+            | Parameter_sym(mode, t) ->
+               Symbols.Maps.add param (mode, t) result
             | _ ->
                result
          ) Symbols.Maps.empty subprogram_info.sub_parameters
@@ -266,6 +266,7 @@ let translate_subprogram_prototype state context sub =
    let subprogram_info = {
       sub_parameters = [];
       sub_preconditions = [];
+      sub_postconditions = [];
    } in
    let subprogram_sym =
       try
@@ -305,15 +306,22 @@ let translate_subprogram_prototype state context sub =
                            context 
                            param.Parse_tree.param_type
                         in
-                        sym.sym_info <- Parameter_sym(t);
+                        sym.sym_info <- Parameter_sym(param.Parse_tree.param_mode, t);
                         sym :: parameters
                with Bail_out -> parameters
             ) sub.Parse_tree.sub_parameters [];
-   (* Translate preconditions. *)
-   subprogram_info.sub_preconditions <-
-      List.map
-         (translate_expr context)
-         sub.Parse_tree.sub_preconditions;
+   (* Translate constraints. *)
+   let (pre, post) =
+      List.fold_left (fun (pre, post) constr ->
+         let e = translate_expr context constr.Parse_tree.constr_expr in
+         match constr.Parse_tree.constr_mode with
+            | Const_parameter | In_parameter -> (e::pre, post)
+            | Out_parameter -> (pre, e::post)
+            | In_out_parameter -> (e::pre, e::post)
+      ) ([], []) sub.Parse_tree.sub_constraints
+   in
+   subprogram_info.sub_preconditions <- pre;
+   subprogram_info.sub_postconditions <- post;
    (* Translate the body later. *)
    state.st_subprograms <-
       (subprogram_sym, sub) :: state.st_subprograms

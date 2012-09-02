@@ -283,22 +283,53 @@ let rec type_check
       begin match call.call_target.sym_info with
       | Subprogram_sym(subprogram_info) ->
          let preconditions = ref subprogram_info.sub_preconditions in
+         let postconditions = ref subprogram_info.sub_postconditions in
          let (parameters: (symbol * expr option) array) = Array.of_list
             (List.map (fun parameter_sym ->
                (parameter_sym, None)) subprogram_info.sub_parameters)
          in
          let positional_args, named_args = call.call_arguments in
-         let got_argument i arg =
+         let input_context = context in
+         let output_context = ref context in
+         let got_argument i (arg_in, arg_out) =
             match parameters.(i) with
                | (parameter_sym, None) ->
-                  begin
-                     match parameter_sym.sym_info with Parameter_sym(param_type) ->
-                     let arg, arg_t = type_check_expr
-                        {context with tc_expected = Some param_type} arg
-                     in
-                     ignore arg_t;
-                     preconditions := List.map (subst parameter_sym arg) !preconditions;
-                     parameters.(i) <- (parameter_sym, Some arg)
+                  begin match parameter_sym.sym_info with Parameter_sym(mode, param_type) ->
+                     begin match mode with
+                        | Const_parameter | In_parameter ->
+                           let arg, arg_t = type_check_expr
+                              {input_context with tc_expected = Some param_type} arg_in
+                           in
+                           ignore arg_t;
+                           preconditions := List.map
+                              (subst parameter_sym arg) !preconditions;
+                           parameters.(i) <- (parameter_sym, Some arg);
+                           output_context :=
+                              {!output_context with
+                                 tc_facts =
+                                    Comparison(EQ, arg, arg_out)
+                                       :: (!output_context).tc_facts}
+                        | Out_parameter ->
+                           let arg, arg_t = type_check_expr
+                              {input_context with tc_expected = None} arg_in
+                           in
+                           ignore arg_t;
+                           parameters.(i) <- (parameter_sym, Some arg);
+                           assign_to_lvalue !output_context arg_out param_type;
+                           postconditions := List.map
+                              (subst parameter_sym arg_out) !postconditions
+                        | In_out_parameter ->
+                           let arg, arg_t = type_check_expr
+                              {input_context with tc_expected = Some param_type} arg_in
+                           in
+                           ignore arg_t;
+                           preconditions := List.map
+                              (subst parameter_sym arg) !preconditions;
+                           parameters.(i) <- (parameter_sym, Some arg);
+                           assign_to_lvalue !output_context arg_out param_type;
+                           postconditions := List.map
+                              (subst parameter_sym arg_out) !postconditions
+                     end
                   end
                | (parameter_sym, Some _) ->
                   Errors.semantic_error call.call_location
@@ -306,24 +337,24 @@ let rec type_check
                         ^ "' specified twice.")
          in
          (* Bind positional arguments. *)
-         list_iteri (fun i (arg_in, arg_out) ->
+         list_iteri (fun i arg ->
             if i >= Array.length parameters then begin
                Errors.semantic_error call.call_location
                   ("Too many arguments to "
                      ^ describe_symbol call.call_target ^ ".")
             end else begin
-               got_argument i arg_in
+               got_argument i arg
             end
          ) positional_args;
          (* Bind named arguments. *)
-         List.iter (fun (name, (arg_in, arg_out)) ->
+         List.iter (fun (name, arg) ->
             let rec search i =
                if i >= Array.length parameters then begin
                   Errors.semantic_error call.call_location
                      ("Parameter `" ^ name ^ "' doesn't exist in call to "
                         ^ describe_symbol call.call_target ^ ".")
                end else if (fst parameters.(i)).sym_name = name then begin
-                  got_argument i arg_in
+                  got_argument i arg
                end else begin
                   search (i + 1)
                end
@@ -339,7 +370,7 @@ let rec type_check
          ) parameters;
          (* Prove that this subprogram's preconditions can be met, assuming
             the facts we know. *)
-         List.iter (prove state context call.call_location) !preconditions;
+         List.iter (prove state input_context call.call_location) !preconditions;
          (* Store the argument binding for later translation stages. *)
          call.call_bound_arguments <-
             begin
@@ -350,7 +381,11 @@ let rec type_check
                      loop (arg::bound_arguments) (i-1)
                in loop [] (Array.length parameters)
             end;
-         type_check state context tail
+         (* Continue, assuming the postconditions. *)
+         type_check state
+            {!output_context with
+               tc_facts = !postconditions @ (!output_context).tc_facts}
+            tail
       end
    | Static_assert_term(loc, expr, tail) ->
       let expr, expr_t =
@@ -402,45 +437,23 @@ let resolve_unknowns
 let type_check_blocks
    (blocks: block list)
    (entry_point: block)
-   (parameters: ttype Symbols.Maps.t)
+   (parameters: (param_mode * ttype) Symbols.Maps.t)
 =
-   (* For each block, create a new context with unknown types
-      for live variables. *)
+   (* For each block, set unknown types for live variables. *)
    List.iter (fun block ->
-      let initial_vars =
-         if block == entry_point then begin
-            Symbols.Maps.mapi
-               (fun parameter_sym parameter_type ->
-                  let param' = new_version parameter_sym in
-                  param'.ver_type <- Some parameter_type;
-                  (From_parameters, param'))
-               parameters
-         end else begin
-            Symbols.Maps.empty
-         end
-      in
-      block.bl_in <-
-         Symbols.Maps.fold (fun x origin vars ->
-            if Symbols.Maps.mem x vars then begin
-               vars
-            end else begin
-               if (block == entry_point) &&
-                  (match x.sym_info with Parameter_sym _ -> false | _ -> true)
-               then begin
-                  (* This is free at the start of the subprogram.
-                     It is therefore uninitialised. *)
-                  vars
-               end else begin
-                  let xv = new_version x in
-                  let t = Unknown_type
-                     {unk_incoming = [];
-                      unk_outgoing = []}
-                  in
-                  xv.ver_type <- Some t;
-                  Symbols.Maps.add x (origin, xv) vars
-               end;
-            end
-         ) block.bl_free initial_vars
+      Symbols.Maps.iter (fun x (origin, xv) ->
+         assert (xv.ver_symbol == x);
+         match x.sym_info with
+            | Parameter_sym(Out_parameter, _)
+            | Variable_sym when block == entry_point ->
+               (* Free at start of subprogram -> uninitialised. *)
+               assert (match xv.ver_type with None -> true | Some _ -> false)
+            | Parameter_sym((Const_parameter | In_parameter | In_out_parameter), _)
+            | Variable_sym ->
+               xv.ver_type <- Some (Unknown_type
+                  {unk_incoming = [];
+                   unk_outgoing = []});
+      ) block.bl_in
    ) blocks;
 
    let first_pass = ref true in

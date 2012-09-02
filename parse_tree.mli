@@ -16,7 +16,7 @@ and subprogram =
       sub_location      : loc;
       sub_name          : dotted_name;
       sub_parameters    : parameter list;
-      sub_preconditions : expr list;
+      sub_constraints   : konstraint list;
       sub_body          : statement;
    }
 
@@ -24,7 +24,14 @@ and parameter =
    {
       param_location : loc;
       param_name     : string;
+      param_mode     : Symbols.param_mode;
       param_type     : ttype;
+   }
+
+and konstraint =
+   {
+      constr_mode    : Symbols.param_mode;
+      constr_expr    : expr;
    }
 
 and package =

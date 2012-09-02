@@ -71,10 +71,8 @@ and block =
       (* Set of free varibles in the body, with types.
          Analogous to the variables that are
          live when entering the block. *)
-      mutable bl_free         : liveness_origin Symbols.Maps.t;
-      mutable bl_preconditions: expr list;
-      (* XXX: bl_free_types and bl_free are redundant! *)
       mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
+      mutable bl_preconditions: expr list;
    }
 
 val new_block_id: unit -> int

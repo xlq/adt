@@ -57,7 +57,14 @@ let rec translate_expr context = function
    | Boolean_literal(true) -> 100, "true"
    | Boolean_literal(false) -> 100, "false"
    | Integer_literal(i) -> 100, string_of_big_int i
-   | Var_v(_,x) -> 100, c_name_of_symbol_v x
+   | Var_v(_,x) ->
+      begin match x.ver_symbol.sym_info with
+         | Parameter_sym((Const_parameter | In_parameter), _)
+         | Variable_sym ->
+            100, c_name_of_symbol_v x
+         | Parameter_sym((In_out_parameter | Out_parameter), _) ->
+            90, ("*" ^ c_name_of_symbol_v x)
+      end
    | Negation(e) ->
       let e = translate_expr context e in
       90, "!" ^ paren 90 e
@@ -75,7 +82,13 @@ let rec translate_expr context = function
          ^ " " ^ paren 50 rhs
 
 let translate_lvalue context = function
-   | Var_v(_,x) -> c_name_of_symbol_v x
+   | Var_v(_,x) ->
+      begin match x.ver_symbol.sym_info with
+         | Parameter_sym(_, _) ->
+            "*" ^ c_name_of_symbol_v x
+         | Variable_sym ->
+            c_name_of_symbol_v x
+      end
 
 let rec translate_icode context f = function
    | Null_term _ -> ()
@@ -131,8 +144,11 @@ let declare_function f subprogram_sym =
       ^ String.concat ", "
          (List.map
             (fun param ->
-               match param.sym_info with Parameter_sym(t) ->
-                  c_name_of_type t ^ " " ^ param.sym_name)
+               match param.sym_info with
+                  | Parameter_sym((Const_parameter | In_parameter), t) ->
+                     c_name_of_type t ^ " " ^ param.sym_name
+                  | Parameter_sym((Out_parameter | In_out_parameter), t) ->
+                     c_name_of_type t ^ " *" ^ param.sym_name)
             sub.sub_parameters)
       ^ ")")
 

@@ -25,7 +25,7 @@ let check_end (pos1, name1) (pos2, name2) =
 /* Keywords */
 %token PACKAGE PROCEDURE NULL END AND OR VAR IS IF THEN ELSE ELSIF
 %token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE
-%token INSPECT_TYPE STATIC_ASSERT
+%token INSPECT_TYPE STATIC_ASSERT IN OUT
 
 /* Punctuation */
 %token COLON SEMICOLON DOT DOTDOT COMMA ASSIGN RARROW
@@ -83,10 +83,15 @@ subprogram:
             sub_location      = pos ();
             sub_name          = $2;
             sub_parameters    = fst $3;
-            sub_preconditions = snd $3;
+            sub_constraints   = snd $3;
             sub_body          = $5;
          }
       }
+
+parameter_mode:
+   | IN          { Symbols.In_parameter }
+   | OUT         { Symbols.Out_parameter }
+   | IN OUT      { Symbols.In_out_parameter }
 
 opt_parameters:
    | /* empty */ { ([], []) }
@@ -95,11 +100,11 @@ opt_parameters:
 parameters:
    | parameter
       { ([$1], []) }
-   | expr
+   | konstraint
       { ([], [$1]) }
    | parameter SEMICOLON parameters
       { ($1::fst $3, snd $3) }
-   | expr SEMICOLON parameters
+   | konstraint SEMICOLON parameters
       { (fst $3, $1::snd $3) }
 
 parameter:
@@ -108,7 +113,33 @@ parameter:
          {
             param_location = pos ();
             param_name     = $1;
-            param_type     = $3
+            param_mode     = Symbols.Const_parameter;
+            param_type     = $3;
+         }
+      }
+   | IDENT COLON parameter_mode ttype
+      {
+         {
+            param_location = pos ();
+            param_name     = $1;
+            param_mode     = $3;
+            param_type     = $4;
+         }
+      }
+
+konstraint:
+   | expr
+      {
+         {
+            constr_mode    = Symbols.Const_parameter;
+            constr_expr    = $1;
+         }
+      }
+   | parameter_mode expr
+      {
+         {
+            constr_mode    = $1;
+            constr_expr    = $2;
          }
       }
 

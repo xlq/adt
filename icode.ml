@@ -44,9 +44,8 @@ and block =
       bl_id                   : int;
       bl_statement            : Parse_tree.statement;
       mutable bl_body         : iterm option;
-      mutable bl_free         : liveness_origin Symbols.Maps.t;
-      mutable bl_preconditions: expr list;
       mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
+      mutable bl_preconditions: expr list;
    }
 
 let rec dump_term (f: formatter) = function
@@ -101,11 +100,6 @@ let dump_block (f: formatter) (bl: block) =
                   ^ ": " ^ string_of_type (unsome x.ver_type));
                break f
             ) bl.bl_in
-         end else if not (Symbols.Maps.is_empty bl.bl_free) then begin
-            Symbols.Maps.iter (fun x origin ->
-               puts f ("| " ^ full_name x ^ ": <unknown>");
-               break f
-            ) bl.bl_free
          end;
          List.iter (fun p ->
             puts f ("| "
@@ -133,7 +127,7 @@ let equal_keys a b =
       | _::_, _::_ -> false
    in compare (Symbols.Maps.bindings a, Symbols.Maps.bindings b)
 
-let map_union_map =
+let map_union_map assert_same =
    Symbols.Maps.merge
       (fun _ a b ->
          match a, b with
@@ -141,7 +135,7 @@ let map_union_map =
             | Some a, None -> Some a
             | None, Some b -> Some b
             | Some a, Some b ->
-               (* Choose one arbitrarily. *)
+               assert_same a b;
                Some a
       )
 
@@ -176,7 +170,7 @@ let rec bind_versions context iterm =
          Jump_term {jmp with
             jmp_versions = Symbols.Maps.mapi
                (fun x _ -> Symbols.Maps.find x context)
-               jmp.jmp_target.bl_free}
+               jmp.jmp_target.bl_in}
       | Call_term(call, tail) ->
          assert (match call.call_bound_arguments with [] -> true | _ -> false);
          let positional_args, named_args = call.call_arguments in
@@ -218,8 +212,10 @@ let calculate_free_names (blocks: block list): unit =
    (* First pass: collect free and bound names. *)
    let (jumps: (block * jump_info * Symbols.Sets.t) list ref) = ref [] in
    List.iter (fun block ->
-      let rec search (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
-         iterm -> liveness_origin Symbols.Maps.t
+      let rec search
+         (free: (liveness_origin * symbol_v) Symbols.Maps.t)
+         (bound: Symbols.Sets.t):
+         iterm -> (liveness_origin * symbol_v) Symbols.Maps.t
       = function
          | Null_term _ | Inspect_type_term _ -> free
          | Assignment_term(_,dest,src,p) ->
@@ -267,8 +263,10 @@ let calculate_free_names (blocks: block list): unit =
             search
                (esearch free bound expr)
                bound tail
-      and esearch (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
-         expr -> liveness_origin Symbols.Maps.t
+      and esearch
+         (free: (liveness_origin * symbol_v) Symbols.Maps.t)
+         (bound: Symbols.Sets.t):
+         expr -> (liveness_origin * symbol_v) Symbols.Maps.t
       = function
          | Boolean_literal _ | Integer_literal _ -> free
          | Var(loc, x) ->
@@ -277,17 +275,19 @@ let calculate_free_names (blocks: block list): unit =
                free
             end else begin
                (* x is not bound - it was live at the start of this block. *)
-               Symbols.Maps.add x (Used_variable loc) free
+               Symbols.Maps.add x (Used_variable loc, new_version x) free
             end
          | Comparison(op, lhs, rhs) ->
             esearch (esearch free bound lhs) bound rhs
-      and esearch_lvalue (free: liveness_origin Symbols.Maps.t) (bound: Symbols.Sets.t):
-         expr -> (liveness_origin Symbols.Maps.t) * Symbols.Sets.t
+      and esearch_lvalue
+         (free: (liveness_origin * symbol_v) Symbols.Maps.t)
+         (bound: Symbols.Sets.t):
+         expr -> ((liveness_origin * symbol_v) Symbols.Maps.t) * Symbols.Sets.t
       = function
-         | Var(loc, x) ->
-            free, Symbols.Sets.add x bound
+         | Var_v(loc, x) ->
+            free, Symbols.Sets.add x.ver_symbol bound
       in
-      block.bl_free <- search Symbols.Maps.empty Symbols.Sets.empty
+      block.bl_in <- search Symbols.Maps.empty Symbols.Sets.empty
          (unsome block.bl_body)
    ) blocks;
 
@@ -298,16 +298,17 @@ let calculate_free_names (blocks: block list): unit =
       List.iter (fun (block, jump, bound) ->
          let jump_free =
             map_minus_set
-               jump.jmp_target.bl_free (* variables that are free in the jump target *)
+               jump.jmp_target.bl_in   (* variables that are free in the jump target *)
                bound                   (* and are not bound above the jump in its block *)
          in
          let new_free =
             map_union_map
-               block.bl_free
+               (fun (_, a) (_, b) -> assert (a == b))
+               block.bl_in
                jump_free
          in
-         if not (equal_keys block.bl_free new_free) then begin
-            block.bl_free <- new_free;
+         if not (equal_keys block.bl_in new_free) then begin
+            block.bl_in <- new_free;
             changed := true
          end
       ) !jumps
@@ -315,9 +316,6 @@ let calculate_free_names (blocks: block list): unit =
 
    (* Bind variables to versions. *)
    List.iter (fun block ->
-      let context = Symbols.Maps.mapi
-         (fun x _ -> new_version x)
-         block.bl_free
-      in
+      let context = Symbols.Maps.map snd block.bl_in in
       block.bl_body <- Some (bind_versions context (unsome block.bl_body))
    ) blocks

@@ -4,6 +4,12 @@ open Misc
 type comparison = | EQ | LT | LE
                   | NE | GE | GT
 
+and param_mode =
+   | Const_parameter
+   | In_parameter
+   | In_out_parameter
+   | Out_parameter
+
 type ttype =
    | Unknown_type of unknown
    | Unit_type
@@ -43,11 +49,12 @@ and symbol_info =
    | Package_sym
    | Subprogram_sym of subprogram_info
    | Variable_sym
-   | Parameter_sym of ttype
+   | Parameter_sym of param_mode * ttype
 
 and subprogram_info = {
    mutable sub_parameters : symbol list;
    mutable sub_preconditions : expr list;
+   mutable sub_postconditions: expr list;
 }
 
 exception Already_defined of symbol
