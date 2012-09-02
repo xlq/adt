@@ -100,6 +100,23 @@ let rec expressions_match m n =
       | Comparison _, _ | _, Comparison _ ->
          false
 
+(* Eliminate M = N by substituting M -> N. *)
+let elim_equals facts e =
+   let rec loop facts e = function
+      | [] -> (facts, e)
+      | (Comparison(EQ, Var_v(_,x), m))::tail
+      | (Comparison(EQ, m, Var_v(_,x)))::tail ->
+         prerr_endline ("Substituting "
+            ^ full_name_v x ^ " |-> "
+            ^ string_of_expr m);
+         loop
+            (List.map (substv x m) facts)
+            (substv x m e)
+            (List.map (substv x m) tail)
+      | m::tail ->
+         loop (m::facts) e tail
+   in loop [] e facts
+
 let prove
    (state: state)
    (context: context)
@@ -113,6 +130,9 @@ let prove
          (List.map string_of_expr context.tc_facts));
    let facts = List.map normalise context.tc_facts in
    let e = normalise to_prove in
+
+   let facts, e = elim_equals facts e in
+
    if List.exists (expressions_match e) facts then
       (* Trivial case: we already know e is true. *)
       ()
