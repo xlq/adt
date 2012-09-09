@@ -208,10 +208,10 @@ let calculate_versions (blocks: block list): unit =
    in
    let rec bind_iterm context = function
       | Assignment_term(loc, dest, src, tail) ->
+         let src = bind_expr context src in
          let context, dest = bind_lvalue context dest in
-         Assignment_term(loc, dest,
-            bind_expr context src,
-            bind_iterm context tail)
+         let tail = bind_iterm context tail in
+         Assignment_term(loc, dest, src, tail)
       | If_term(loc, cond, true_part, false_part) ->
          If_term(loc,
             bind_expr context cond,
