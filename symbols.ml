@@ -32,16 +32,18 @@ and expr =
 and symbol = {
    sym_id               : int;
    sym_name             : string;
+   sym_declared         : Lexing.position option;
    sym_parent           : symbol option;
    mutable sym_children : symbol list;
    mutable sym_info     : symbol_info;
-   mutable sym_versions : symbol_v list;
+   mutable sym_last_version
+                        : int;
 }
 
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int;
-   mutable ver_type     : ttype option;
+   mutable ver_next     : symbol_v option;
 }
 
 and symbol_info =
@@ -78,10 +80,11 @@ let rec loc_of_expression = function
 let root_symbol = {
    sym_id            = 0;
    sym_name          = "Standard";
+   sym_declared      = None;
    sym_parent        = None;
    sym_children      = [];
    sym_info          = Package_sym;
-   sym_versions      = [];
+   sym_last_version  = 0;
 }
 
 let dotted_name sym =
@@ -137,56 +140,39 @@ let describe_symbol sym =
    ) ^ " `" ^ full_name sym ^ "'"
 
 let find_in scope name =
-   try
-      Some (List.find
-         (fun sym -> sym.sym_name = name)
-         scope.sym_children)
-   with Not_found -> None
+   List.filter
+      (fun sym -> sym.sym_name = name)
+      scope.sym_children
 
-let new_symbol scope name info =
-   begin match find_in scope name with
-      | None -> ()
-      | Some sym ->
-         raise (Already_defined sym)
-   end;
+let new_overloaded_symbol scope name loc info =
    incr last_sym_id;
    let new_sym = {
       sym_id            = !last_sym_id;
       sym_name          = name;
+      sym_declared      = loc;
       sym_parent        = Some scope;
       sym_children      = [];
       sym_info          = info;
-      sym_versions      = [];
+      sym_last_version  = 0;
    } in
    scope.sym_children <- new_sym :: scope.sym_children;
    new_sym
 
+let new_symbol scope name loc info =
+   begin match find_in scope name with
+      | [] -> ()
+      | sym::_ ->
+         raise (Already_defined sym)
+   end;
+   new_overloaded_symbol scope name loc info
+
 let new_version sym =
-   let sym_v = {
+   sym.sym_last_version <- sym.sym_last_version + 1;
+   {
       ver_symbol = sym;
-      ver_number =
-         (match sym.sym_versions with
-            | [] -> 1
-            | x::_ -> x.ver_number + 1);
-      ver_type = None;
-   } in
-   sym.sym_versions <- sym_v :: sym.sym_versions;
-   sym_v
-
-let find scope name =
-   let rec try_scope scope =
-      match find_in scope name with
-         | Some sym -> Some sym
-         | None ->
-            match scope.sym_parent with
-               | None -> None
-               | Some parent -> try_scope parent
-   in try_scope scope
-
-let find_variable scope name =
-   match find scope name with
-      | Some sym -> sym
-      | None -> new_symbol scope name Variable_sym
+      ver_number = sym.sym_last_version;
+      ver_next = None;
+   }
 
 let dump_symbols () =
    let rec dump_sym sym =

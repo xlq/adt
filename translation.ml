@@ -49,6 +49,74 @@ let get_loc_of_expression = function
    | Parse_tree.Integer_literal(loc,_)
    | Parse_tree.Name(loc,_) -> loc
 
+let is_subprogram sym =
+   match sym.sym_info with
+      | Subprogram_sym _ -> true
+      | _ -> false
+
+let report_previous_declaration sym =
+   match sym.sym_declared with
+      | None -> ()
+      | Some loc ->
+         Errors.semantic_error loc
+            "Previous declaration was here."
+
+let already_declared_error old_sym new_loc =
+   Errors.semantic_error new_loc
+      ("`" ^ old_sym.sym_name ^ "' already declared as "
+         ^ describe_symbol old_sym ^ ".");
+   report_previous_declaration old_sym
+
+let find scope name =
+   let rec search scope =
+      let try_parent () =
+         match scope.sym_parent with
+            | None -> []
+            | Some parent -> search parent
+      in
+      match Symbols.find_in scope name with
+         | [] -> try_parent ()
+         | x::l ->
+            if is_subprogram x then begin
+               assert (List.for_all is_subprogram l);
+               List.rev_append (x::l) (try_parent ())
+            end else begin
+               assert (match l with [] -> true | _ -> false);
+               [x]
+            end
+   in search scope
+
+(* Find the symbol with the given name in the current scope,
+   defaulting to a new variable. *)
+let find_variable scope loc name: symbol =
+   match find scope name with
+      | [] ->
+         new_symbol scope name None Variable_sym
+      | [result] -> result
+      | results ->
+         assert (List.for_all is_subprogram results);
+         Errors.semantic_error loc
+            ("Expression expected but overloaded subprogram `"
+               ^ name ^ "' found.");
+         raise Bail_out
+
+let find_subprograms scope loc name: symbol list =
+   match find scope name with
+      | [] ->
+         Errors.semantic_error loc
+            ("`" ^ name ^ "' is undefined.");
+         raise Bail_out
+      | [x] ->
+         if is_subprogram x then [x] else begin
+            Errors.semantic_error loc
+               ("Subprogram expected but "
+                  ^ describe_symbol x ^ " found.");
+            raise Bail_out
+         end
+      | results ->
+         assert (List.for_all is_subprogram results);
+         results
+
 let rec translate_type
    (scope: symbol)
    (typ: Parse_tree.ttype): ttype
@@ -68,7 +136,7 @@ let rec translate_expr
 =
    match expression with
       | Parse_tree.Name(loc, [name]) ->
-         let sym = Symbols.find_variable scope name in
+         let sym = find_variable scope loc name in
          begin match sym.sym_info with
             | Variable_sym -> Var(loc, sym)
             | Parameter_sym(mode, declared_type) -> Var(loc, sym)
@@ -91,7 +159,7 @@ let translate_lvalue
 =
    match expression with
       | Parse_tree.Name(loc, [name]) ->
-         let sym = Symbols.find_variable scope name in
+         let sym = find_variable scope loc name in
          begin match sym.sym_info with
             | Variable_sym -> sym
             | _ ->
@@ -118,7 +186,6 @@ let make_jump
    Jump_term {
       jmp_location = loc;
       jmp_target = target;
-      jmp_versions = Symbols.Maps.empty;
    }
 
 (* Create a new block by applying the given translation function. Nothing is
@@ -146,7 +213,7 @@ let make_block
          new_block
 
 let interpret_as_lvalue = function
-   | Var(loc, x) -> Some (Var_v(loc, new_version x))
+   | Var(loc, x) -> Some (Var(loc, x))
    | _ -> None
 
 let rec translate_statement
@@ -199,42 +266,28 @@ let rec translate_statement
          (*condition_block.bl_free <- !annotations;*)
          make_jump loc condition_block
       | Parse_tree.Subprogram_call(loc, [name], (positional_args, named_args), tail) ->
-         begin match Symbols.find scope name with
-         | None ->
-            Errors.semantic_error loc ("`" ^ name ^ "' is undefined.");
-            raise Bail_out
-         | Some subprogram_sym ->
-            begin match subprogram_sym.sym_info with
-            | Subprogram_sym(subprogram_info) ->
-               let positional_args = List.map
-                  (fun arg ->
-                     let arg = translate_expr scope arg in
-                     (arg, interpret_as_lvalue arg))
-                  positional_args
-               in
-               let named_args = List.map
-                  (fun (name, arg) ->
-                     let arg = translate_expr scope arg in
-                     (name, (arg, interpret_as_lvalue arg)))
-                  named_args
-               in
-               Call_term(
-                  {call_location    = loc;
-                   call_target      = subprogram_sym;
-                   call_arguments   = (positional_args, named_args);
-                   call_bound_arguments = [];
-                  },
-                  translate_statement state scope after tail)
-            | _ ->
-               Errors.semantic_error loc
-                  ("Subprogram expected but "
-                     ^ describe_symbol subprogram_sym
-                     ^ " found.");
-               raise Bail_out
-            end
-         end
+         let candidates =  find_subprograms scope loc name in
+         let positional_args = List.map
+            (fun arg ->
+               let arg = translate_expr scope arg in
+               (arg, interpret_as_lvalue arg))
+            positional_args
+         in
+         let named_args = List.map
+            (fun (name, arg) ->
+               let arg = translate_expr scope arg in
+               (name, (arg, interpret_as_lvalue arg)))
+            named_args
+         in
+         Call_term(
+            {call_location          = loc;
+             call_candidates        = candidates;
+             call_arguments         = (positional_args, named_args);
+             call_bound_arguments   = [];
+            },
+            translate_statement state scope after tail)
       | Parse_tree.Inspect_type(loc,[x],tail) ->
-         let sym = Symbols.find_variable scope x in
+         let sym = find_variable scope loc x in
          begin match sym.sym_info with
             | Variable_sym | Parameter_sym(_) -> 
                Inspect_type_term(loc, sym,
@@ -260,6 +313,12 @@ and translate_block
 
 let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
+   begin match find scope name with
+      | [] -> ()
+      | [x] when is_subprogram x -> ()
+      | [x] -> already_declared_error x sub.Parse_tree.sub_location
+      | results -> ()
+   end;
    let subprogram_info = {
       sub_parameters = [];
       sub_preconditions = [];
@@ -267,12 +326,11 @@ let translate_subprogram_prototype state scope sub =
    } in
    let subprogram_sym =
       try
-         new_symbol scope name
+         new_overloaded_symbol scope name
+            (Some sub.Parse_tree.sub_location)
             (Subprogram_sym subprogram_info)
       with Already_defined sym ->
-         Errors.semantic_error sub.Parse_tree.sub_location
-            ("`" ^ name ^ "' already defined as "
-               ^ describe_symbol sym ^ ".");
+         already_declared_error sym sub.Parse_tree.sub_location;
          raise Bail_out
    in
    let scope = subprogram_sym in
@@ -282,15 +340,16 @@ let translate_subprogram_prototype state scope sub =
          (fun param parameters ->
             try
                match Symbols.find_in scope param.Parse_tree.param_name with
-                     | Some _ ->
+                     | _::_ ->
                         Errors.semantic_error sub.Parse_tree.sub_location
                            ("Parameter `" ^ param.Parse_tree.param_name
                               ^ "' defined twice.");
                         raise Bail_out
-                     | None ->
+                     | [] ->
                         let sym = new_symbol
                            subprogram_sym
                            param.Parse_tree.param_name
+                           (Some param.Parse_tree.param_location)
                            Unfinished_sym
                         in
                         let t = translate_type
@@ -312,7 +371,7 @@ let translate_subprogram_prototype state scope sub =
    in
    subprogram_info.sub_preconditions <- pre;
    subprogram_info.sub_postconditions <- post;
-   Type_checking.type_check_subprogram_declaration subprogram_info;
+   (*Type_checking.type_check_subprogram_declaration subprogram_info;*)
    (* Translate the body later. *)
    state.st_subprograms <-
       (subprogram_sym, sub) :: state.st_subprograms
@@ -339,13 +398,16 @@ let translate_subprogram_body compiler state subprogram_sym sub =
       List.fold_left
          (fun bl_in param ->
             Symbols.Maps.add param
-               (From_parameters, new_version param) bl_in)
+               (new_version param) bl_in)
          Symbols.Maps.empty subprogram_info.sub_parameters;
-   calculate_free_names state.st_blocks;
-   Type_checking.type_check_blocks
+   calculate_versions state.st_blocks;
+   let f = new_formatter () in
+   dump_blocks f state.st_blocks;
+   prerr_endline (get_fmt_str f);
+   (*Type_checking.type_check_blocks
       state.st_blocks
       entry_point;
-   Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
+   Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
    state.st_blocks <- []
 
 let translate_declarations state scope declarations =
@@ -360,15 +422,17 @@ let translate_declarations state scope declarations =
 let finish_translation compiler state =
    let subs = state.st_subprograms in
    state.st_subprograms <- [];
-   List.iter (fun (sym, sub) ->
-      Backend_c.declare compiler sym) subs;
+   (*List.iter (fun (sym, sub) ->
+      Backend_c.declare compiler sym) subs;*)
    List.iter (fun (sym, sub) ->
       try translate_subprogram_body compiler state sym sub
       with Bail_out -> ()) subs
 
 let translate_package compiler state pkg =
    match pkg.Parse_tree.pkg_name with [name] ->
-   let package_sym = new_symbol root_symbol name Package_sym in
+   let package_sym = new_symbol root_symbol name
+      (Some pkg.Parse_tree.pkg_location) Package_sym
+   in
    translate_declarations state package_sym
       pkg.Parse_tree.pkg_declarations;
    finish_translation compiler state

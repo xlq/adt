@@ -41,10 +41,12 @@ and expr =
 and symbol = {
    sym_id               : int; (* unique identifier *)
    sym_name             : string;
+   sym_declared         : Lexing.position option;
    sym_parent           : symbol option;
    mutable sym_children : symbol list;
    mutable sym_info     : symbol_info;
-   mutable sym_versions : symbol_v list;
+   mutable sym_last_version
+                        : int;
 }
 
 (* A symbol_v is a version of a symbol. In constraints, etc., each symbol_v is
@@ -55,7 +57,8 @@ and symbol = {
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int; (* for dumping and ordering *)
-   mutable ver_type     : ttype option;
+   (* Used in conversion to SSA. *)
+   mutable ver_next     : symbol_v option;
 }
 
 and symbol_info =
@@ -84,9 +87,18 @@ val full_name_v : symbol_v -> string
 val string_of_type : ttype -> string
 val string_of_expr : expr -> string
 val describe_symbol : symbol -> string
-val find_in : symbol -> string -> symbol option
-val new_symbol : symbol -> string -> symbol_info -> symbol
+val find_in : symbol -> string -> symbol list
+val new_symbol : symbol (* scope *)
+              -> string (* name *)
+              -> Lexing.position option (* declaration position *)
+              -> symbol_info
+              -> symbol
+(* Same as above, but allows creating symbols of the
+   same name in the same scope. *)
+val new_overloaded_symbol : symbol
+                         -> string
+                         -> Lexing.position option
+                         -> symbol_info
+                         -> symbol
 val new_version : symbol -> symbol_v
-val find : symbol -> string -> symbol option
-val find_variable : symbol -> string -> symbol
 val dump_symbols : unit -> unit

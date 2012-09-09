@@ -14,12 +14,6 @@ open Symbols
 
 type loc = Parse_tree.loc
 
-(* Reason why a variable is live at a particular point. *)
-type liveness_origin =
-   | Used_variable of Lexing.position
-   | From_parameters
-   | Returned_parameter of Lexing.position
-
 (* Reason why a constraint must be solved. *)
 type constraint_origin =
    | From_postconditions of Lexing.position * symbol (* subprogram symbol *)
@@ -56,22 +50,21 @@ and jump_info =
       jmp_location      : loc;
       (* Target of jump. *)
       jmp_target        : block;
-      (* Versions of variables to bind to the free variables of jmp_target
-         (i.e. jmp_target.bl_free). This is empty until after
-         calculate_free_names. *)
-      jmp_versions      : symbol_v Symbols.Maps.t;
    }
 
 and call_info =
    {
       call_location   : loc;
-      call_target     : symbol;
+      (* Candidate subprograms (more than one here for overloaded
+         subprograms). There is always at least one candidate here. *)
+      call_candidates : symbol list;
       (* Each argument has a pair of expressions (in, out):
          'in' contains the versions to be passed to the subprogram, while
          'out' contains new versions, for values to be received from the
          subprogram (in the case of Out_parameter or In_out_parameter).
          If the argument was not a valid L-value, out is None. *)
-      call_arguments  : (expr * expr option) list * (string * (expr * expr option)) list;
+      call_arguments  : (expr * expr option) list
+                      * (string * (expr * expr option)) list;
       (* call_bound_arguments is set once the target subprogram has been
          chosen. The list is in the same order as the target's parameters. *)
       mutable call_bound_arguments
@@ -90,7 +83,7 @@ and block =
       (* Set of free varibles in the body, with types.
          Analogous to the variables that are
          live when entering the block. *)
-      mutable bl_in           : (liveness_origin * symbol_v) Symbols.Maps.t;
+      mutable bl_in           : symbol_v Symbols.Maps.t;
       mutable bl_preconditions: (constraint_origin * expr) list;
    }
 
@@ -100,5 +93,5 @@ val dump_blocks: formatter -> block list -> unit
 val loc_of_constraint_origin : constraint_origin -> Lexing.position
 val describe_constraint_origin : constraint_origin -> string
 
-(* Calculate bl_free. This is essentially liveness analysis. *)
-val calculate_free_names: block list -> unit
+(* Calculate bl_in. This is essentially liveness analysis. *)
+val calculate_versions: block list -> unit

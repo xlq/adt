@@ -8,6 +8,10 @@ type pass =
    | Guessing_pass
    (* Checking pass - unknown types are rejected. *)
    | Checking_pass
+   (* Type checking during overloaded function resolution.
+      No error messages must be output. The symbol table
+      must not be mutated. *)
+   | Overload_testing
 
 type context = {
    (* The current pass. *)
@@ -24,7 +28,20 @@ type state = {
    mutable ts_unsolved  : (constraint_origin * expr) list;
 }
 
-exception Type_error
+type type_error =
+   | Type_mismatch of Lexing.position
+                    * ttype (* expected *)
+                    * ttype (* found *)
+   | Uninitialised of Lexing.position
+                    * symbol
+   | Argument_not_lvalue of Lexing.position * symbol (* parameter *)
+   | Argument_specified_twice of Lexing.position * symbol (* parameter *)
+   | Too_many_arguments of Lexing.position * symbol (* subprogram *)
+   | No_parameter_named of Lexing.position * string * symbol (* subprogram *)
+   | Missing_argument_for_parameter of Lexing.position * symbol (* parameter *)
+
+exception Type_error of type_error
+exception Bail_out
 exception Unresolved_unknown
 exception Unsolved_constraint
 
@@ -33,15 +50,52 @@ let assert_unit t =
       | Unit_type -> true
       | _ -> false)
 
-let report_liveness_origin sym = function
-   | Used_variable loc ->
-      Errors.semantic_error loc
-         (String.capitalize (describe_symbol sym)
-            ^ " is used here.")
-   | Returned_parameter loc ->
-      Errors.semantic_error loc
-         (describe_symbol sym
-            ^ " is returned here.")
+let report_type_error extra err =
+   let extra = match extra with
+      | Some s -> " " ^ s
+      | None -> ""
+   in
+   match err with
+      | Type_mismatch(loc, expected, found) ->
+         Errors.semantic_error loc
+            ("Expected type `"
+               ^ string_of_type expected
+               ^ "' but found type `"
+               ^ string_of_type found ^ "'"
+               ^ extra ^ ".")
+      | Uninitialised(loc, x) ->
+         Errors.semantic_error loc
+            (String.capitalize (describe_symbol x)
+               ^ " might not be initialised yet"
+               ^ extra ^ ".")
+      | Argument_not_lvalue(loc, parameter) ->
+         Errors.semantic_error loc
+            ("Argument for "
+               ^ describe_symbol parameter
+               ^ " must be a variable.")
+      | Argument_specified_twice(loc, parameter) ->
+         Errors.semantic_error loc
+            ("Parameter `" ^ parameter.sym_name
+               ^ "' specified twice.")
+      | Too_many_arguments(loc, subprogram) ->
+         Errors.semantic_error loc
+            ("Too many arguments for "
+               ^ describe_symbol subprogram)
+      | No_parameter_named(loc, name, subprogram) ->
+         Errors.semantic_error loc
+            ("Parameter `" ^ name ^ "' doesn't exist in "
+               ^ describe_symbol subprogram ^ ".")
+      | Missing_argument_for_parameter(loc, parameter) ->
+         Errors.semantic_error loc
+            ("Missing argument for parameter `" ^ parameter.sym_name
+               ^ "' of " ^ describe_symbol (unsome parameter.sym_parent) ^ ".")
+
+let produce_type_error context err =
+   match context.tc_pass with
+      | Guessing_pass | Checking_pass ->
+         report_type_error None err
+      | Overload_testing ->
+         raise (Type_error(err))
 
 (* Substitute a variable with a term, in the given expression. *)
 let rec subst x_sym replacement expr =
@@ -175,6 +229,8 @@ let rec coerce context loc t1 t2: ttype =
                t2
             | Checking_pass ->
                raise Unresolved_unknown
+            | Overload_testing ->
+               t2
          end
       | t1, Unknown_type(unk) ->
          begin match context.tc_pass with
@@ -184,11 +240,12 @@ let rec coerce context loc t1 t2: ttype =
                t1
             | Checking_pass ->
                raise Unresolved_unknown
+            | Overload_testing ->
+               t1
          end
       | _ ->
-         Errors.semantic_error loc
-            ("Expected type `" ^ string_of_type t2
-               ^ "' but found type `" ^ string_of_type t1 ^ "'.");
+         produce_type_error context
+            (Type_mismatch(loc, t2, t1));
          t2
 
 let got_type
@@ -211,10 +268,11 @@ let rec type_check_expr
    | Var_v(loc,x) ->
       begin match x.ver_type with
          | None ->
-            Errors.semantic_error loc
-               (String.capitalize (describe_symbol x.ver_symbol)
-                  ^ " might not be initialised yet.");
-            raise Type_error
+            produce_type_error context
+               (Uninitialised(loc, x.ver_symbol));
+            (match context.tc_expected with
+               | Some t -> t
+               | None -> Unit_type)
          | Some t ->
             got_type context loc t
       end
@@ -241,7 +299,8 @@ let rec bind_pre_post_condition (post: bool) e =
                Var_v(loc,
                   {ver_symbol = param;
                    ver_number = -1;
-                   ver_type = Some t})
+                   ver_type = Some t;
+                   ver_next = None})
             end else begin
                Errors.semantic_error loc
                   (String.capitalize (describe_symbol param)
@@ -280,6 +339,22 @@ let assign_to_lvalue
    (src_type: ttype)
 = match dest with
    | Var_v(_, x) -> x.ver_type <- Some src_type
+
+type candidate =
+   {
+      mutable can_rejected       : (symbol option * type_error) option;
+      mutable can_symbol         : symbol;
+      mutable can_info           : subprogram_info;
+      can_parameters             : (symbol * (expr * expr option) option) array;
+      mutable can_preconditions  : expr list;
+      mutable can_postconditions : expr list;
+      mutable can_extra_facts    : expr list;
+   }
+
+let for_parameter = function
+   | None -> None
+   | Some parameter ->
+      Some ("for parameter `" ^ parameter.sym_name ^ "'")
 
 let rec type_check
    (state: state)
@@ -348,9 +423,10 @@ let rec type_check
          | Some t -> assert_unit t
       end;
       Unit_type
+   (*
    | Jump_term(jmp) ->
       let preconditions = ref jmp.jmp_target.bl_preconditions in
-      Symbols.Maps.iter (fun x (origin, target) ->
+      Symbols.Maps.iter (fun x target ->
          try
             let source_version = try
                Symbols.Maps.find x jmp.jmp_versions
@@ -360,8 +436,7 @@ let rec type_check
                Errors.semantic_error jmp.jmp_location
                   (String.capitalize (describe_symbol x)
                      ^ " must be initialised by now, but might not be.");
-               report_liveness_origin x origin;
-               raise Type_error
+               raise Bail_out
             in
             ignore (coerce context jmp.jmp_location
                (unsome source_version.ver_type)
@@ -374,7 +449,7 @@ let rec type_check
                         (Var_v(jmp.jmp_location, source_version))
                         constr))
                   !preconditions
-         with Type_error -> ()
+         with Bail_out -> ()
       ) jmp.jmp_target.bl_in;
       List.iter
          (fun (origin, constr) ->
@@ -382,149 +457,219 @@ let rec type_check
          !preconditions;
       Unit_type
    | Call_term(call, tail) ->
-      begin match call.call_target.sym_info with
-      | Subprogram_sym(subprogram_info) ->
-         let preconditions = ref subprogram_info.sub_preconditions in
-         let postconditions = ref subprogram_info.sub_postconditions in
-         let (parameters: (symbol * expr option) array) = Array.of_list
-            (List.map (fun parameter_sym ->
-               (parameter_sym, None)) subprogram_info.sub_parameters)
-         in
-         let positional_args, named_args = call.call_arguments in
-         let input_context = context in
-         let output_context = ref context in
-         let got_argument i (arg_in, arg_out) =
-            match parameters.(i) with
-               | (parameter_sym, None) ->
-                  begin match parameter_sym.sym_info with Parameter_sym(mode, param_type) ->
-                     begin match mode with
+      (* Assemble a list of successful candidate subprograms. *)
+      let candidates = List.map
+         (fun subprogram_sym ->
+            match subprogram_sym.sym_info with Subprogram_sym(subprogram_info) ->
+               {
+                  can_rejected      = None;
+                  can_symbol        = subprogram_sym;
+                  can_info          = subprogram_info;
+                  can_parameters    = Array.of_list
+                     (List.map (fun parameter_sym -> (parameter_sym, None))
+                        subprogram_info.sub_parameters);
+                  can_preconditions = subprogram_info.sub_preconditions;
+                  can_postconditions= subprogram_info.sub_postconditions;
+                  can_extra_facts   = [];
+               }
+         ) call.call_candidates
+      in
+      assert (match candidates with | [] -> false | _ -> true);
+      let reject_candidate candidate (parameter: symbol option) (reason: type_error) =
+         candidate.can_rejected <- Some (parameter, reason);
+         (* If that was the last candidate, it's time to report some errors. *)
+         if List.for_all (fun other_candidate ->
+            match other_candidate.can_rejected with
+               | Some _ -> true
+               | None -> false) candidates
+         then begin
+            begin match candidates with
+               | [x] ->
+                  assert (x == candidate); (* of course *)
+                  report_type_error
+                     (for_parameter parameter)
+                     reason
+               | x::_ ->
+                  Errors.semantic_error call.call_location
+                     ("No definition of `" ^ x.can_symbol.sym_name
+                        ^ "' matches these arguments.");
+                  List.iter (fun candidate ->
+                     match candidate.can_rejected with Some (parameter, reason) ->
+                        match candidate.can_symbol.sym_declared with Some loc ->
+                           Errors.semantic_error loc
+                              ("This definition of `"
+                                 ^ x.can_symbol.sym_name ^ "' doesn't match because:");
+                           report_type_error
+                              (for_parameter parameter)
+                              reason
+                  ) candidates
+            end;
+            raise Bail_out
+         end
+      in
+      let positional_args, named_args = call.call_arguments in
+      let input_context = context in
+      let context = () in ignore(context);
+      let got_argument candidate i (arg_in, arg_out) =
+         match candidate.can_parameters.(i) with
+            | (parameter_sym, None) ->
+               (* Mark parameter as matched. *)
+               candidate.can_parameters.(i) <- (parameter_sym, Some(arg_in, arg_out));
+               begin match parameter_sym.sym_info with
+               | Parameter_sym(param_mode, param_type) ->
+                  try
+                     (* Input parameter. *)
+                     begin match param_mode with
+                        | Const_parameter | In_parameter | In_out_parameter ->
+                           ignore (type_check_expr
+                              {input_context with
+                                 tc_expected = Some param_type;
+                                 tc_pass = Overload_testing}
+                              arg_in);
+                           candidate.can_preconditions <-
+                              List.map (subst parameter_sym arg_in)
+                                 candidate.can_preconditions;
+                        | Out_parameter -> ()
+                     end;
+                     (* Output parameter. *)
+                     begin match param_mode with
                         | Const_parameter | In_parameter ->
-                           let arg_t = type_check_expr
-                              {input_context with tc_expected = Some param_type} arg_in
-                           in
-                           preconditions := List.map
-                              (subst parameter_sym arg_in) !preconditions;
-                           parameters.(i) <- (parameter_sym, Some arg_in);
                            begin match arg_out with
                               | Some arg_out ->
                                  (* The argument was a valid L-value but was not
                                     matched to an "in" or "in out" parameter.
                                     Set the type of arg_out and record that
                                     arg_in and arg_out are equal. *)
-                                 assign_to_lvalue !output_context arg_out arg_t;
-                                 output_context :=
-                                    {!output_context with
-                                       tc_facts =
-                                          Comparison(EQ, arg_in, arg_out)
-                                             :: (!output_context).tc_facts}
+                                 (* TODO: assign_to_lvalue context arg_out arg_in_t *)
+                                 candidate.can_extra_facts <-
+                                    Comparison(EQ, arg_in, arg_out)
+                                       :: candidate.can_extra_facts
                               | None -> ()
-                           end;
-                           postconditions := List.map
-                              (subst parameter_sym arg_in) !postconditions
-                        | Out_parameter ->
-                           let arg_out = match arg_out with
-                              | Some arg_out -> arg_out
+                           end
+                        | In_out_parameter | Out_parameter ->
+                           begin match arg_out with
                               | None ->
-                                 Errors.semantic_error
-                                    (loc_of_expression arg_in)
-                                    ("Argument for `out' parameter `"
-                                       ^ full_name parameter_sym
-                                       ^ "' must be a variable.");
-                                 raise Type_error
-                           in
-                           let arg_t = type_check_expr
-                              {input_context with tc_expected = None} arg_in
-                           in
-                           ignore arg_t;
-                           parameters.(i) <- (parameter_sym, Some arg_in);
-                           assign_to_lvalue !output_context arg_out param_type;
-                           postconditions := List.map
-                              (subst parameter_sym arg_out) !postconditions
-                        | In_out_parameter ->
-                           let arg_out = match arg_out with
-                              | Some arg_out -> arg_out
-                              | None ->
-                                 Errors.semantic_error
-                                    (loc_of_expression arg_in)
-                                    ("Argument for `in out' parameter `"
-                                       ^ full_name parameter_sym
-                                       ^ "' must be a variable.");
-                                 raise Type_error
-                           in
-                           let arg_t = type_check_expr
-                              {input_context with tc_expected = Some param_type} arg_in
-                           in
-                           ignore arg_t;
-                           preconditions := List.map
-                              (subst parameter_sym arg_in) !preconditions;
-                           parameters.(i) <- (parameter_sym, Some arg_in);
-                           assign_to_lvalue !output_context arg_out param_type;
-                           postconditions := List.map
-                              (subst parameter_sym arg_out) !postconditions
+                                 reject_candidate candidate (Some parameter_sym)
+                                    (Argument_not_lvalue(loc_of_expression arg_in,
+                                       parameter_sym))
+                              | Some arg_out ->
+                                 ignore (type_check_expr
+                                    {input_context with
+                                       tc_expected = None;
+                                       tc_pass = Overload_testing}
+                                    arg_in);
+                                 (* TODO: assign_to_lvalue arg_out param_type *)
+                                 candidate.can_postconditions <-
+                                    List.map (subst parameter_sym arg_out)
+                                       candidate.can_postconditions
+                           end
                      end
-                  end
-               | (parameter_sym, Some _) ->
-                  Errors.semantic_error call.call_location
-                     ("Parameter `" ^ parameter_sym.sym_name
-                        ^ "' specified twice.")
-         in
-         (* Bind positional arguments. *)
-         list_iteri (fun i arg ->
-            if i >= Array.length parameters then begin
-               Errors.semantic_error call.call_location
-                  ("Too many arguments to "
-                     ^ describe_symbol call.call_target ^ ".")
-            end else begin
-               got_argument i arg
-            end
-         ) positional_args;
-         (* Bind named arguments. *)
-         List.iter (fun (name, arg) ->
-            let rec search i =
-               if i >= Array.length parameters then begin
-                  Errors.semantic_error call.call_location
-                     ("Parameter `" ^ name ^ "' doesn't exist in call to "
-                        ^ describe_symbol call.call_target ^ ".")
-               end else if (fst parameters.(i)).sym_name = name then begin
-                  got_argument i arg
-               end else begin
-                  search (i + 1)
+                  with Type_error error ->
+                     reject_candidate candidate (Some parameter_sym) error
                end
-            in search 0
-         ) named_args;
-         (* Check that all parameters have arguments. *)
+            | (parameter_sym, Some _) ->
+               reject_candidate candidate (Some parameter_sym)
+                  (Argument_specified_twice(loc_of_expression arg_in,
+                     parameter_sym))
+      in
+      (* Process positional arguments. *)
+      list_iteri (fun i arg ->
+         List.iter (fun candidate ->
+            match candidate.can_rejected with
+               | None ->
+                  if i >= Array.length candidate.can_parameters then begin
+                     reject_candidate candidate None
+                        (Too_many_arguments(
+                           call.call_location,
+                           candidate.can_symbol))
+                  end else begin
+                     got_argument candidate i arg
+                  end
+               | Some _ -> ()
+         ) candidates;
+      ) positional_args;
+      (* Process named arguments. *)
+      List.iter (fun (name, arg) ->
+         List.iter (fun candidate ->
+            match candidate.can_rejected with
+               | None ->
+                  let rec search i =
+                     if i >= Array.length candidate.can_parameters then
+                        reject_candidate candidate None
+                           (No_parameter_named(
+                              loc_of_expression (fst arg),
+                              name,
+                              candidate.can_symbol))
+                     else if (fst candidate.can_parameters.(i)).sym_name = name
+                     then
+                        got_argument candidate i arg
+                     else
+                        search (i + 1)
+                  in search 0
+               | Some _ -> ()
+         ) candidates
+      ) named_args;
+      (* Check that all parameters have arguments. *)
+      List.iter (fun candidate ->
          Array.iter (function
             | (_, Some _) -> ()
-            | (parameter_sym, None) ->
-               Errors.semantic_error call.call_location
-                  ("Missing argument for parameter `" ^ parameter_sym.sym_name
-                     ^ "' of " ^ describe_symbol call.call_target ^ ".")
-         ) parameters;
-         (* Prove that this subprogram's preconditions can be met, assuming
-            the facts we know. *)
-         List.iter
-            (prove state input_context
-               (From_preconditions(call.call_location, call.call_target)))
-            !preconditions;
-         (* Store the argument binding for later translation stages. *)
-         call.call_bound_arguments <-
-            begin
-               let rec loop bound_arguments = function
-                  | 0 -> bound_arguments
-                  | i ->
-                     let _, Some arg = parameters.(i-1) in
-                     loop (arg::bound_arguments) (i-1)
-               in loop [] (Array.length parameters)
+            | (parameter, None) ->
+               reject_candidate candidate (Some parameter)
+                  (Missing_argument_for_parameter(call.call_location, parameter))
+         ) candidate.can_parameters
+      ) candidates;
+      let remaining_candidates = List.filter (fun candidate ->
+         match candidate.can_rejected with
+            | None -> true
+            | Some _ -> false
+         ) candidates
+      in
+      begin match remaining_candidates with
+         | [candidate] ->
+            prerr_endline ("Chose `"
+               ^ candidate.can_symbol.sym_name ^ "' at "
+               ^ Errors.string_of_location (unsome candidate.can_symbol.sym_declared)
+               ^ ".");
+            List.iter (fun precondition ->
+               prove state input_context
+                  (From_preconditions(
+                     Symbols.loc_of_expression precondition,
+                     candidate.can_symbol))
+                  precondition)
+               candidate.can_preconditions;
+            (* TODO: Store argument binding. *)
+            Array.iter (function
+               | {sym_info =
+                     Parameter_sym((Out_parameter|In_out_parameter),t)},
+                 Some(arg_in, Some arg_out)
+               ->
+                  assign_to_lvalue input_context arg_out t
+               | ({sym_info = Parameter_sym(_,_)}, _) -> ()
+            ) candidate.can_parameters;
+            let output_context = {input_context with
+               tc_facts = List.rev_append
+                  candidate.can_postconditions
+                  (List.rev_append
+                     candidate.can_extra_facts
+                     input_context.tc_facts)}
+            in
+            type_check state output_context tail
+         | first::_ ->
+            begin match input_context.tc_pass with
+               | Guessing_pass -> ()
+               | Checking_pass ->
+                  Errors.semantic_error call.call_location
+                     ("Ambiguous call of overloaded subprogram `"
+                        ^ first.can_symbol.sym_name ^ "'.");
+                  List.iter (fun candidate ->
+                     Errors.semantic_error
+                        (unsome candidate.can_symbol.sym_declared)
+                        ("This definition matches.")
+                  ) remaining_candidates
             end;
-         (* Continue, assuming the postconditions. *)
-         prerr_endline ("Post-conditions after call: "
-            ^ String.concat " and "
-               (List.map string_of_expr !postconditions));
-         type_check state
-            {!output_context with
-               tc_facts = !postconditions @ (!output_context).tc_facts}
-            tail
-      end
+            type_check state input_context tail
+      end;
+   *)
    | Static_assert_term(loc, expr, tail) ->
       ignore (type_check_expr
          {context with tc_expected = Some Boolean_type}
