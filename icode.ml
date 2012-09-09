@@ -218,9 +218,21 @@ let calculate_versions (blocks: block list): unit =
             bind_iterm context true_part,
             bind_iterm context false_part)
       | Return_term(ret) ->
-         (* TODO: Avoid keeping context around.
-            Return_term can know which variables it needs. *)
-         Return_term({ret with ret_versions = context})
+         begin match ret.ret_subprogram.sym_info with Subprogram_sym(info) ->
+            Return_term({ret with ret_versions =
+               List.fold_left (fun ret_versions parameter ->
+                  match parameter.sym_info with Parameter_sym(mode, t) ->
+                     match mode with
+                        | In_out_parameter | Out_parameter ->
+                           Symbols.Maps.add
+                              parameter
+                              (Symbols.Maps.find parameter context)
+                              ret_versions
+                        | Const_parameter | In_parameter ->
+                           ret_versions
+               ) Symbols.Maps.empty info.sub_parameters
+            })
+         end
       | (Jump_term(jmp)) as e ->
          Symbols.Maps.iter (fun x xv ->
             let xv' = Symbols.Maps.find x jmp.jmp_target.bl_in in
