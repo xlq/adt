@@ -51,13 +51,13 @@ and symbol = {
 
 (* A symbol_v is a version of a symbol. In constraints, etc., each symbol_v is
    a separate variable, even though many symbol_v objects represent the same
-   symbol in the source programme (see: static single assignment form).
+   symbol in the source programme (a bit like static single assignment form).
    Objects of symbol_v can and should be compared physically: there is one
    object for each symbol and version. *)
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int; (* for dumping and ordering *)
-   (* Used in conversion to SSA. *)
+   (* Used in calculate_versions. *)
    mutable ver_next     : symbol_v option;
 }
 

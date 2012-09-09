@@ -5,8 +5,7 @@
    when the block is entered.
    The intermediate representation contains no control flow
    merges: loops are converted to recursion. This makes
-   typing simpler.
-   The intermediate representation is in static single assignment form. *)
+   typing simpler. *)
 
 open Symbols
 open Formatting
@@ -75,9 +74,6 @@ and block =
    {
       (* Unique identifier for dumping. *)
       bl_id                   : int;
-      (* The source statement that was translated
-         to produce this block. *)
-      bl_statement            : Parse_tree.statement;
       (* The result of the translation. *)
       mutable bl_body         : iterm option;
       (* Set of free varibles in the body, with types.

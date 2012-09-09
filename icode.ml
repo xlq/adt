@@ -54,7 +54,6 @@ and call_info =
 and block =
    {
       bl_id                   : int;
-      bl_statement            : Parse_tree.statement;
       mutable bl_body         : iterm option;
       mutable bl_in           : symbol_v Symbols.Maps.t;
       mutable bl_preconditions: (constraint_origin * expr) list;

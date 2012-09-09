@@ -34,6 +34,16 @@ type state =
       mutable st_blocks: block list;
    }
 
+let new_block state =
+   let block = {
+      bl_id             = new_block_id ();
+      bl_body           = None;
+      bl_in             = Symbols.Maps.empty;
+      bl_preconditions  = [];
+   } in
+   state.st_blocks <- block :: state.st_blocks;
+   block
+
 (* Get the source file location of a statement. *)
 let get_loc_of_statement = function
    | Parse_tree.No_statement(loc) (* -> raise (Failure "get_loc_of_statement") *)
@@ -169,16 +179,6 @@ let translate_lvalue
                raise Bail_out
          end
 
-(* Find the block for the given source statement.
-   This is so that statements only get translated once each.
-   XXX: I don't think a statement would get translated twice anyway. *)
-let find_block (state: state) (statement: Parse_tree.statement): block option =
-   let rec search = function
-      | [] -> None
-      | bl :: l when bl.bl_statement == statement -> Some bl
-      | bl :: l -> search l
-   in search state.st_blocks
-
 let make_jump
    (loc: Lexing.position)
    (target: block): iterm
@@ -187,30 +187,6 @@ let make_jump
       jmp_location = loc;
       jmp_target = target;
    }
-
-(* Create a new block by applying the given translation function. Nothing is
-   done if the statement has already been translated.  In either case, returns the
-   block corresponding to the translated statement. *)
-let make_block
-   (state: state)
-   (statement: Parse_tree.statement)
-   (translate: block -> iterm): block
-=
-   match find_block state statement with
-      | Some bl -> bl
-      | None ->
-         let new_block =
-            {
-               bl_id             = new_block_id ();
-               bl_statement      = statement;
-               bl_body           = None;
-               bl_in             = Symbols.Maps.empty;
-               bl_preconditions  = [];
-            }
-         in
-         state.st_blocks <- new_block :: state.st_blocks;
-         new_block.bl_body <- Some (translate new_block);
-         new_block
 
 let interpret_as_lvalue = function
    | Var(loc, x) -> Some (Var(loc, x))
@@ -253,17 +229,13 @@ let rec translate_statement
             translate_statement state scope (Continue_with cont) true_part,
             translate_statement state scope (Continue_with cont) false_part)
       | Parse_tree.While_loop(loc, condition, body, cont) ->
-         (* XXX: If we're at the start of a block, make_block will do nothing! *)
-         let condition_block =
-            make_block state statement
-               (fun loop_start ->
-                  If_term(loc,
-                     translate_expr scope condition,
-                     translate_statement state scope
-                        (Continue_with loop_start) body,
-                     translate_statement state scope after cont))
-         in
-         (*condition_block.bl_free <- !annotations;*)
+         let condition_block = new_block state in
+         condition_block.bl_body <- Some
+            (If_term(loc,
+               translate_expr scope condition,
+               translate_statement state scope
+                  (Continue_with condition_block) body,
+               translate_statement state scope after cont));
          make_jump loc condition_block
       | Parse_tree.Subprogram_call(loc, [name], (positional_args, named_args), tail) ->
          let candidates =  find_subprograms scope loc name in
@@ -308,8 +280,10 @@ and translate_block
    (statement: Parse_tree.statement):
    block
 =
-   make_block state statement
-      (fun _ -> translate_statement state scope after statement)
+   let block = new_block state in
+   block.bl_body <- Some
+      (translate_statement state scope after statement);
+   block
 
 let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
