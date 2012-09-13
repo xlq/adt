@@ -15,10 +15,13 @@ type ttype =
    | Unit_type
    | Boolean_type
    | Integer_type
+   | Uninitialised of ttype
 
 and unknown = {
    mutable unk_incoming : ttype list;
    mutable unk_outgoing : ttype list;
+   mutable unk_decided  : ttype option;
+   mutable unk_visiting : bool;
 }
 
 and expr =
@@ -43,6 +46,7 @@ and symbol = {
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int;
+   mutable ver_type     : ttype;
    mutable ver_next     : symbol_v option;
 }
 
@@ -171,6 +175,12 @@ let new_version sym =
    {
       ver_symbol = sym;
       ver_number = sym.sym_last_version;
+      ver_type = Unknown_type {
+         unk_incoming = [];
+         unk_outgoing = [];
+         unk_decided = None;
+         unk_visiting = false
+      };
       ver_next = None;
    }
 

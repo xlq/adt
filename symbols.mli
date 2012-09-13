@@ -17,6 +17,7 @@ type ttype =
    | Unit_type
    | Boolean_type
    | Integer_type
+   | Uninitialised of ttype
 
 and unknown = {
    (* Incoming candidate types. These are types from
@@ -26,6 +27,12 @@ and unknown = {
       that this type is expected to have (or expected
       to be coerced into). *)
    mutable unk_outgoing : ttype list;
+   (* Multiple references to this unknown may exist,
+      so this field is set when the type is decided,
+      before the Unknown_type is removed. *)
+   mutable unk_decided : ttype option;
+   (* Used during resolution. *)
+   mutable unk_visiting : bool;
 }
 
 and expr =
@@ -57,6 +64,7 @@ and symbol = {
 and symbol_v = {
    ver_symbol           : symbol;
    ver_number           : int; (* for dumping and ordering *)
+   mutable ver_type     : ttype;
    (* Used in calculate_versions. *)
    mutable ver_next     : symbol_v option;
 }

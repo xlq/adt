@@ -27,7 +27,7 @@ type iterm =
                     * iterm (* true part *)
                     * iterm (* false part *)
    | Return_term of return_info
-   | Jump_term of jump_info
+   | Jump_term of loc * block
    | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
@@ -43,14 +43,6 @@ and return_info =
       ret_versions      : symbol_v Symbols.Maps.t;
    }
 
-and jump_info =
-   {
-      (* Source file location. *)
-      jmp_location      : loc;
-      (* Target of jump. *)
-      jmp_target        : block;
-   }
-
 and call_info =
    {
       call_location   : loc;
@@ -62,7 +54,8 @@ and call_info =
          'out' contains new versions, for values to be received from the
          subprogram (in the case of Out_parameter or In_out_parameter).
          If the argument was not a valid L-value, out is None. *)
-      call_arguments  : (expr * expr option) list
+      mutable call_arguments
+                      : (expr * expr option) list
                       * (string * (expr * expr option)) list;
       (* call_bound_arguments is set once the target subprogram has been
          chosen. The list is in the same order as the target's parameters. *)

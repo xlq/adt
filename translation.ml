@@ -179,15 +179,6 @@ let translate_lvalue
                raise Bail_out
          end
 
-let make_jump
-   (loc: Lexing.position)
-   (target: block): iterm
-=
-   Jump_term {
-      jmp_location = loc;
-      jmp_target = target;
-   }
-
 let interpret_as_lvalue = function
    | Var(loc, x) -> Some (Var(loc, x))
    | _ -> None
@@ -208,7 +199,7 @@ let rec translate_statement
                   ret_versions = Symbols.Maps.empty
                }
             | Continue_with cont ->
-               make_jump loc cont
+               Jump_term(loc, cont)
          end
       | Parse_tree.Assignment(loc, dest, src, cont) ->
          let dest = translate_expr scope dest in
@@ -236,7 +227,7 @@ let rec translate_statement
                translate_statement state scope
                   (Continue_with condition_block) body,
                translate_statement state scope after cont));
-         make_jump loc condition_block
+         Jump_term(loc, condition_block)
       | Parse_tree.Subprogram_call(loc, [name], (positional_args, named_args), tail) ->
          let candidates =  find_subprograms scope loc name in
          let positional_args = List.map
@@ -368,20 +359,26 @@ let translate_subprogram_body compiler state subprogram_sym sub =
             subprogram_sym),
           precondition))
       subprogram_info.sub_preconditions;
+   (* Add parameters to bl_in (needed by calculate_versions). *)
    entry_point.bl_in <-
-      List.fold_left
-         (fun bl_in param ->
-            Symbols.Maps.add param
-               (new_version param) bl_in)
-         Symbols.Maps.empty subprogram_info.sub_parameters;
+      List.fold_left (fun bl_in param ->
+         match param.sym_info with
+         Parameter_sym(mode, t) ->
+            let paramv = new_version param in
+            paramv.ver_type <-
+               begin match mode with
+               | Const_parameter | In_parameter
+               | In_out_parameter -> t
+               | Out_parameter -> Uninitialised(t)
+               end;
+            Symbols.Maps.add param paramv bl_in
+      ) Symbols.Maps.empty subprogram_info.sub_parameters;
    calculate_versions state.st_blocks;
    let f = new_formatter () in
-   dump_blocks f state.st_blocks;
+   (*dump_blocks f state.st_blocks;*)
    prerr_endline (get_fmt_str f);
-   (*Type_checking.type_check_blocks
-      state.st_blocks
-      entry_point;
-   Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
+   Type_checking.type_check_blocks state.st_blocks;
+   (*Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
    state.st_blocks <- []
 
 let translate_declarations state scope declarations =

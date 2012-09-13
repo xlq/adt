@@ -19,7 +19,7 @@ type iterm =
    | Assignment_term of loc * expr * expr * iterm
    | If_term of loc * expr * iterm * iterm
    | Return_term of return_info
-   | Jump_term of jump_info
+   | Jump_term of loc * block
    | Call_term of call_info * iterm
    | Inspect_type_term of loc * symbol * iterm
    | Static_assert_term of loc * expr * iterm
@@ -35,17 +35,12 @@ and return_info =
       ret_versions      : symbol_v Symbols.Maps.t;
    }
 
-and jump_info =
-   {
-      jmp_location      : loc;
-      jmp_target        : block;
-   }
-
 and call_info =
    {
       call_location   : loc;
       call_candidates : symbol list;
-      call_arguments  : (expr * expr option) list
+      mutable call_arguments
+                      : (expr * expr option) list
                       * (string * (expr * expr option)) list;
       mutable call_bound_arguments
                       : expr list;
@@ -71,7 +66,7 @@ let rec dump_term (f: formatter) = function
       break f; indent f; dump_term f a;
       break f; undent f; puts f "else"; break f; indent f;
       dump_term f b; undent f;
-   | Jump_term {jmp_target=bl} ->
+   | Jump_term(_,bl) ->
       puts f ("tail block" ^ string_of_int bl.bl_id)
    | Call_term(call, tail) ->
       let positional_args, named_args = call.call_arguments in
@@ -110,7 +105,8 @@ let dump_block (f: formatter) (bl: block) =
          break f;
          if not (Symbols.Maps.is_empty bl.bl_in) then begin
             Symbols.Maps.iter (fun _ x ->
-               puts f ("| " ^ full_name_v x);
+               puts f ("| " ^ full_name_v x
+                  ^ ": " ^ string_of_type x.ver_type);
                break f
             ) bl.bl_in
          end;
@@ -159,7 +155,7 @@ let all_variables (blocks: block list): unit Symbols.Maps.t =
          search_iterm true_part;
          search_iterm false_part
       | Return_term(ret) -> ()
-      | Jump_term(jmp) -> ()
+      | Jump_term _ -> ()
       | Call_term(call, tail) ->
          let positional, named = call.call_arguments in
          List.iter (fun (arg_in, _) -> search_expr arg_in) positional;
@@ -232,9 +228,9 @@ let calculate_versions (blocks: block list): unit =
                ) Symbols.Maps.empty info.sub_parameters
             })
          end
-      | (Jump_term(jmp)) as e ->
+      | (Jump_term(loc, target)) as e ->
          Symbols.Maps.iter (fun x xv ->
-            let xv' = Symbols.Maps.find x jmp.jmp_target.bl_in in
+            let xv' = Symbols.Maps.find x target.bl_in in
             merge_versions xv xv'
          ) context;
          e
