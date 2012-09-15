@@ -284,7 +284,10 @@ let type_check_call call =
             ^ Errors.string_of_location
                (unsome candidate.can_subprogram.sym_declared));
          commit candidate.can_changes;
-         (* TODO: Store argument binding. *)
+         call.call_bound_arguments <-
+            Array.fold_right (fun (_, Some x) l -> x::l)
+               candidate.can_parameters [];
+         call.call_candidates <- [candidate.can_subprogram];
          true
       | [] -> raise (Failure "type_check_call") (* Already raised Bail_out. *)
       | _ ->

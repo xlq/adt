@@ -38,12 +38,13 @@ and return_info =
 and call_info =
    {
       call_location   : loc;
-      call_candidates : symbol list;
+      mutable call_candidates
+                      : symbol list;
       mutable call_arguments
                       : (expr * expr option) list
                       * (string * (expr * expr option)) list;
       mutable call_bound_arguments
-                      : expr list;
+                      : (expr * expr option) list;
    }
 
 and block =
@@ -320,3 +321,13 @@ let calculate_versions (blocks: block list): unit =
       block.bl_body <- Some
          (finish_iterm (unsome block.bl_body))
    ) blocks
+
+let rec bind_versions f e =
+   match e with
+      | Boolean_literal _ -> e
+      | Integer_literal _ -> e
+      | Var(loc, x) -> Var_v(loc, f x)
+      | Var_v _ -> e
+      | Negation(e) -> Negation(bind_versions f e)
+      | Comparison(op, lhs, rhs) ->
+         Comparison(op, bind_versions f lhs, bind_versions f rhs)

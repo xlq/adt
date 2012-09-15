@@ -47,8 +47,9 @@ and call_info =
    {
       call_location   : loc;
       (* Candidate subprograms (more than one here for overloaded
-         subprograms). There is always at least one candidate here. *)
-      call_candidates : symbol list;
+         subprograms). There is always at least one candidate here.
+         After resolution, there is *only* one candidate here! *)
+      mutable call_candidates : symbol list;
       (* Each argument has a pair of expressions (in, out):
          'in' contains the versions to be passed to the subprogram, while
          'out' contains new versions, for values to be received from the
@@ -60,7 +61,7 @@ and call_info =
       (* call_bound_arguments is set once the target subprogram has been
          chosen. The list is in the same order as the target's parameters. *)
       mutable call_bound_arguments
-                      : expr list;
+                      : (expr * expr option) list;
    }
 
 and block =
@@ -84,3 +85,6 @@ val describe_constraint_origin : constraint_origin -> string
 
 (* Calculate bl_in. This is essentially liveness analysis. *)
 val calculate_versions: block list -> unit
+
+(* Change all Var to Var_v in an expression. *)
+val bind_versions : (symbol -> symbol_v) -> expr -> expr

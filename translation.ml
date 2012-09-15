@@ -374,10 +374,13 @@ let translate_subprogram_body compiler state subprogram_sym sub =
             Symbols.Maps.add param paramv bl_in
       ) Symbols.Maps.empty subprogram_info.sub_parameters;
    calculate_versions state.st_blocks;
-   let f = new_formatter () in
-   (*dump_blocks f state.st_blocks;*)
-   prerr_endline (get_fmt_str f);
+   (*let f = new_formatter () in
+   puts f "Dumping blocks before type checking...";
+   break f;
+   dump_blocks f state.st_blocks;
+   prerr_endline (get_fmt_str f);*)
    Type_checking.type_check_blocks state.st_blocks;
+   Constraint_checking.constraint_check_blocks state.st_blocks;
    (*Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
    state.st_blocks <- []
 
