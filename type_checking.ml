@@ -186,15 +186,24 @@ let type_check_call call =
          (* Mark this parameter as matched. *)
          candidate.can_parameters.(i) <- (parameter, Some(arg_in, arg_out));
          begin try
+            let arg_in_t = match param_mode with
+               | Out_parameter ->
+                  None
+               | Const_parameter | In_parameter | In_out_parameter ->
+                  Some (type_check_expr (Some param_type) arg_in
+                     candidate.can_changes)
+            in
             begin match param_mode with
-            | Out_parameter ->
-               ()
-            | Const_parameter | In_parameter | In_out_parameter ->
-               ignore (type_check_expr (Some param_type) arg_in
-                  candidate.can_changes)
-            end;
-            begin match param_mode with
-            | Const_parameter | In_parameter ->
+            | Const_parameter ->
+               begin match arg_out with
+               | Some arg_out ->
+                  ignore (
+                     type_check_expr
+                        (Some (unsome arg_in_t))
+                        arg_out candidate.can_changes)
+               | None -> ()
+               end
+            | In_parameter ->
                ()
             | In_out_parameter | Out_parameter ->
                match arg_out with
@@ -271,6 +280,9 @@ let type_check_call call =
    match remaining_candidates with
       | [candidate] ->
          (* Success! Only one candidate remains. *)
+         prerr_endline ("Chose candidate at "
+            ^ Errors.string_of_location
+               (unsome candidate.can_subprogram.sym_declared));
          commit candidate.can_changes;
          (* TODO: Store argument binding. *)
          true
@@ -291,6 +303,14 @@ let merge_types t1 t2 =
          ^ string_of_type t2 ^ "'.");
       raise e
 
+let rec propagate_decision unk decided =
+   List.iter (function
+      | Unknown_type({unk_decided=None} as unk) ->
+         unk.unk_decided <- Some decided;
+         propagate_decision unk decided
+      | _ -> ()
+   ) (unk.unk_incoming @ unk.unk_outgoing)
+
 let rec resolve_unknowns_in_type remaining t =
    match t with
    | Unit_type | Boolean_type | Integer_type -> t
@@ -299,7 +319,10 @@ let rec resolve_unknowns_in_type remaining t =
       let rec fold result = function
          | [] -> result
          | (Unknown_type {unk_visiting=false} as t)::tail ->
-            fold result ((resolve_unknowns_in_type remaining t)::tail)
+            begin match resolve_unknowns_in_type remaining t with
+               | Unknown_type _ -> fold result tail
+               | t -> fold result (t::tail)
+            end
          | (Unknown_type {unk_visiting=true})::tail ->
             fold result tail
          | t::tail ->
@@ -312,7 +335,7 @@ let rec resolve_unknowns_in_type remaining t =
          fold None (unk.unk_incoming @ unk.unk_outgoing);
       unk.unk_visiting <- false;
       match unk.unk_decided with
-         | Some t -> t
+         | Some t -> propagate_decision unk t; t
          | None -> remaining := true; t
 
 let rec resolve_unknowns_in_expr remaining e =
@@ -324,6 +347,29 @@ let rec resolve_unknowns_in_expr remaining e =
    | Comparison(_, lhs, rhs) ->
       resolve_unknowns_in_expr remaining lhs;
       resolve_unknowns_in_expr remaining rhs
+
+let rec resolve_unknowns_in_iterm remaining iterm =
+   match iterm with
+   | Assignment_term(_, dest, _, tail) ->
+      resolve_unknowns_in_expr remaining dest;
+      resolve_unknowns_in_iterm remaining tail
+   | If_term(_, _, true_part, false_part) ->
+      resolve_unknowns_in_iterm remaining true_part;
+      resolve_unknowns_in_iterm remaining false_part;
+   | Return_term _ -> ()
+   | Jump_term _ -> ()
+   | Call_term(call, tail) ->
+      List.iter (fun (_, arg_out) ->
+         match arg_out with
+            | None -> ()
+            | Some e -> resolve_unknowns_in_expr remaining e
+      ) (fst call.call_arguments);
+      List.iter (fun (_, (_, arg_out)) ->
+         match arg_out with
+            | None -> ()
+            | Some e -> resolve_unknowns_in_expr remaining e
+      ) (snd call.call_arguments);
+      resolve_unknowns_in_iterm remaining tail
 
 let type_check_blocks blocks =
    let state = {ts_calls = []} in
@@ -341,20 +387,9 @@ let type_check_blocks blocks =
       List.iter (fun block ->
          Symbols.Maps.iter (fun _ xv ->
             xv.ver_type <- resolve_unknowns_in_type remaining xv.ver_type
-         ) block.bl_in
+         ) block.bl_in;
+         resolve_unknowns_in_iterm remaining (unsome block.bl_body)
       ) blocks;
-
-      List.iter (fun call ->
-         let positional, named = call.call_arguments in
-         let do_arg_out = function
-            | None -> ()
-            | Some arg_out -> resolve_unknowns_in_expr remaining arg_out
-         in
-         List.iter (fun (arg_in, arg_out) ->
-            do_arg_out arg_out) positional;
-         List.iter (fun (name, (arg_in, arg_out)) ->
-            do_arg_out arg_out) named
-      ) state.ts_calls;
 
       state.ts_calls <- begin
          let rec loop result = function
@@ -370,6 +405,11 @@ let type_check_blocks blocks =
 
    if !remaining then begin
       prerr_endline "Some unknowns remain!"
+   end;
+
+   begin match state.ts_calls with
+      | [] -> ()
+      | _ -> prerr_endline "Some subprograms remain unresolved!"
    end;
 
    prerr_endline "";
