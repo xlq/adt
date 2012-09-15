@@ -57,7 +57,7 @@ and block =
 let rec dump_term (f: formatter) = function
    | Return_term(_) -> puts f "return"
    | Assignment_term(_,x,m,tail) ->
-      puts f (string_of_expr x ^ " := "
+      puts f (string_of_lvalue x ^ " := "
          ^ string_of_expr m ^ ";");
       break f;
       dump_term f tail
@@ -77,14 +77,14 @@ let rec dump_term (f: formatter) = function
                (fun (arg_in, arg_out) ->
                   "in " ^ string_of_expr arg_in
                      ^ match arg_out with
-                        | Some arg_out -> " out " ^ string_of_expr arg_out
+                        | Some arg_out -> " out " ^ string_of_lvalue arg_out
                         | None -> "")
                positional_args
              @ List.map
                (fun (name, (arg_in, arg_out)) ->
                   name ^ " => in " ^ string_of_expr arg_in
                      ^ match arg_out with
-                        | Some arg_out -> " out " ^ string_of_expr arg_out
+                        | Some arg_out -> " out " ^ string_of_lvalue arg_out
                         | None -> "")
                named_args)
          ^ ");");

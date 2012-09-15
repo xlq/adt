@@ -111,6 +111,13 @@ let string_of_op = function
    | LE -> "<="
    | GE -> ">="
 
+let rec string_of_type = function
+   | Unknown_type{unk_decided=Some t} -> "<unknown: " ^ string_of_type t ^ ">"
+   | Unknown_type _ -> "<unknown>"
+   | Unit_type -> "Unit"
+   | Boolean_type -> "Boolean"
+   | Integer_type -> "Integer"
+
 let rec string_of_expr = function
    | Boolean_literal(_,true) -> "True"
    | Boolean_literal(_,false) -> "False"
@@ -123,11 +130,10 @@ let rec string_of_expr = function
          ^ string_of_op op ^ " "
          ^ string_of_expr n
 
-let rec string_of_type = function
-   | Unknown_type _ -> "<unknown>"
-   | Unit_type -> "Unit"
-   | Boolean_type -> "Boolean"
-   | Integer_type -> "Integer"
+let string_of_lvalue = function
+    | Var_v(_,sym_v) ->
+        "(" ^ full_name_v sym_v ^ ": "
+            ^ string_of_type sym_v.ver_type ^ ")"
 
 let describe_symbol sym =
    (match sym.sym_info with

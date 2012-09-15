@@ -94,6 +94,7 @@ val full_name : symbol -> string
 val full_name_v : symbol_v -> string
 val string_of_type : ttype -> string
 val string_of_expr : expr -> string
+val string_of_lvalue : expr -> string
 val describe_symbol : symbol -> string
 val find_in : symbol -> string -> symbol list
 val new_symbol : symbol (* scope *)
