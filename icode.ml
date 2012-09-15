@@ -180,11 +180,17 @@ let merge_versions xv xv' =
    if xv != xv' then xv.ver_next <- Some xv'
 
 let calculate_versions (blocks: block list): unit =
+
+   (* Create a new version for every free variable of every block,
+      then link versions together across jumps. *)
+
    let vars = all_variables blocks in
    List.iter (fun block ->
       block.bl_in <- Symbols.Maps.fold
-         (fun x () bl_in -> Symbols.Maps.add x (new_version x) bl_in)
-         vars block.bl_in
+         (fun x () bl_in ->
+            if Symbols.Maps.mem x bl_in then bl_in
+            else Symbols.Maps.add x (new_version x) bl_in
+         ) vars block.bl_in
    ) blocks;
 
    let rec bind_expr context = function
