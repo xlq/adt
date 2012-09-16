@@ -50,6 +50,10 @@ let report_type_error loc = function
             ^ string_of_type found
             ^ "'.")
 
+let catch_type_errors (f: 'a -> unit) (x: 'a): unit =
+   try f x with Type_error(loc, error) ->
+      report_type_error loc error
+
 let commit changes =
    List.iter (fun (unk, t) ->
       unk.unk_incoming <- t :: unk.unk_incoming
@@ -86,7 +90,6 @@ let rec type_check_expr expected expr changes =
          | None -> t
          | Some t2 -> coerce loc t t2 changes; t2
    in
-
    match expr with
       | Boolean_literal(loc,b) ->
          got_type loc Boolean_type
@@ -100,6 +103,59 @@ let rec type_check_expr expected expr changes =
          let rhs_t = type_check_expr None rhs changes in
          coerce loc rhs_t lhs_t changes;
          got_type loc Boolean_type
+
+let rec bind_pre_post_condition (post: bool) e =
+   let r = bind_pre_post_condition post in
+   match e with
+      | Boolean_literal _
+      | Integer_literal _ -> e
+      | Var(loc, param) ->
+         begin match param.sym_info with Parameter_sym(mode, t) ->
+            let available = match mode with
+               | Const_parameter | In_parameter | In_out_parameter -> true
+               | Out_parameter when post -> true
+               | Out_parameter -> false
+            in
+            if available then begin
+               let param_v = new_version param in
+               param_v.ver_type <- t;
+               Var_v(loc, param_v)
+            end else begin
+               Errors.semantic_error loc
+                  (String.capitalize (describe_symbol param)
+                     ^ " is not available in a "
+                     ^ (if post then "post-" else "pre-") ^ "condition.");
+               e
+            end
+         end
+      | Negation(e) -> Negation(r e)
+      | Comparison(op, lhs, rhs) -> Comparison(op, r lhs, r rhs)
+
+let type_check_subprogram_declaration info =
+   let changes = {
+      chg_incoming = [];
+      chg_outgoing = [];
+   } in
+   List.iter
+      (fun constr ->
+         catch_type_errors (fun () ->
+            ignore
+               (type_check_expr
+                  (Some Boolean_type)
+                  (bind_pre_post_condition false constr)
+                  changes))())
+      info.sub_preconditions;
+   List.iter
+      (fun constr ->
+         catch_type_errors (fun () ->
+            ignore
+               (type_check_expr
+                  (Some Boolean_type)
+                  (bind_pre_post_condition true constr)
+                  changes))())
+      info.sub_postconditions;
+   assert (match changes with {chg_incoming=[]; chg_outgoing=[]} -> true
+                            | _ -> false)
 
 let rec type_check state iterm =
    match iterm with
