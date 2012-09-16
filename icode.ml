@@ -322,13 +322,3 @@ let calculate_versions (blocks: block list): unit =
       block.bl_body <- Some
          (finish_iterm (unsome block.bl_body))
    ) blocks
-
-let rec bind_versions f e =
-   match e with
-      | Boolean_literal _ -> e
-      | Integer_literal _ -> e
-      | Var(loc, x) -> Var_v(loc, f x)
-      | Var_v _ -> e
-      | Negation(e) -> Negation(bind_versions f e)
-      | Comparison(op, lhs, rhs) ->
-         Comparison(op, bind_versions f lhs, bind_versions f rhs)

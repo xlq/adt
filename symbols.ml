@@ -205,3 +205,13 @@ let free_variables e =
       | Comparison(_,lhs,rhs) ->
          search (search vars lhs) rhs
    in search [] e
+
+let rec bind_versions f e =
+   match e with
+      | Boolean_literal _ -> e
+      | Integer_literal _ -> e
+      | Var(loc, x) -> Var_v(loc, f x)
+      | Var_v _ -> e
+      | Negation(e) -> Negation(bind_versions f e)
+      | Comparison(op, lhs, rhs) ->
+         Comparison(op, bind_versions f lhs, bind_versions f rhs)

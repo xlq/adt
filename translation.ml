@@ -353,6 +353,7 @@ let translate_subprogram_body compiler state subprogram_sym sub =
          sub.Parse_tree.sub_body
    in
    (* Add parameters to bl_in (calculate_versions doesn't do this). *)
+   assert (Symbols.Maps.is_empty entry_point.bl_in);
    entry_point.bl_in <-
       List.fold_left (fun bl_in param ->
          match param.sym_info with
@@ -367,11 +368,20 @@ let translate_subprogram_body compiler state subprogram_sym sub =
             Symbols.Maps.add param paramv bl_in
       ) Symbols.Maps.empty subprogram_info.sub_parameters;
    calculate_versions state.st_blocks;
-   (*let f = new_formatter () in
-   puts f "Dumping blocks before type checking...";
-   break f;
-   dump_blocks f state.st_blocks;
-   prerr_endline (get_fmt_str f);*)
+   (* Add preconditions to bl_preconditions
+      (constraint_check_blocks doesn't do this). *)
+   assert (match entry_point.bl_preconditions with [] -> true | _ -> false);
+   entry_point.bl_preconditions <-
+      List.map
+         (fun e ->
+            (* NOTE: This constraint_origin should never get used anyway,
+               because there is never a Jump_term to the entry point. *)
+            (From_preconditions(
+               unsome subprogram_sym.sym_declared,
+               unsome subprogram_sym.sym_declared,
+               subprogram_sym),
+             bind_versions (fun x -> Symbols.Maps.find x entry_point.bl_in) e))
+         subprogram_info.sub_preconditions;
    Type_checking.type_check_blocks state.st_blocks;
    Constraint_checking.constraint_check_blocks state.st_blocks entry_point;
    (*Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)

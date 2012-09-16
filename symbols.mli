@@ -114,3 +114,6 @@ val dump_symbols : unit -> unit
 
 (* Return a list of all the free variables in an expression. *)
 val free_variables : expr -> symbol_v list
+
+(* Change all Var to Var_v in an expression. *)
+val bind_versions : (symbol -> symbol_v) -> expr -> expr

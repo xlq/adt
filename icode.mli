@@ -91,6 +91,3 @@ val describe_constraint_origin : constraint_origin -> string
 
 (* Calculate bl_in. This is essentially liveness analysis. *)
 val calculate_versions: block list -> unit
-
-(* Change all Var to Var_v in an expression. *)
-val bind_versions : (symbol -> symbol_v) -> expr -> expr
