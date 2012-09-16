@@ -213,6 +213,11 @@ let rec check_iterm context iterm =
                List.rev_append !postconditions
                   (List.rev_append !invariants context.cc_facts)}
          tail
+   | Static_assert_term(loc, e, tail) ->
+      prove context
+         (From_static_assertion(loc))
+         e;
+      check_iterm context tail
 
 let constraint_check_blocks blocks entry_point =
    let changed = ref true in
@@ -238,18 +243,22 @@ let constraint_check_blocks blocks entry_point =
                   :: block.bl_preconditions;
                changed := true
             end else begin
-               Errors.semantic_error
-                  (loc_of_constraint_origin origin)
-                  ("Cannot prove `"
-                     ^ string_of_expr constr ^ "', "
-                     ^ describe_constraint_origin origin ^ ".");
-               begin match origin with
-                  | From_postconditions(loc,_,_)
-                  | From_preconditions(loc,_,_) ->
-                     Errors.semantic_error loc
+               match origin with
+                  | From_postconditions(loc1, loc2, sub)
+                  | From_preconditions(loc1, loc2, sub) ->
+                     Errors.semantic_error loc2
+                        ("Cannot prove `"
+                           ^ string_of_expr constr ^ "', "
+                           ^ (match origin with
+                              | From_postconditions _ -> "a post-condition of"
+                              | From_preconditions _ -> "a pre-condition of calling")
+                           ^ describe_symbol sub ^ ".");
+                     Errors.semantic_error loc1
                         ("Original constraint is here.")
-                  | From_static_assertion _ -> ()
-               end
+                  | From_static_assertion(loc) ->
+                     Errors.semantic_error loc
+                        ("Static assertion failed: cannot prove `"
+                           ^ string_of_expr constr ^ "'.")
             end
         ) !(context.cc_unsolved)
       ) blocks

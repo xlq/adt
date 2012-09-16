@@ -64,6 +64,8 @@ let rec collect_types_iterm types = function
                collect_types_expr types arg_out
       ) (snd call.call_arguments);
       collect_types_iterm types tail
+   | Static_assert_term(loc, e, tail) ->
+      collect_types_iterm types tail
 
 let collect_types_blocks types blocks =
    List.iter (fun block ->

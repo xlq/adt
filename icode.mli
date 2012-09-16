@@ -84,10 +84,5 @@ and block =
 val new_block_id: unit -> int
 val dump_blocks: formatter -> block list -> unit
 
-(* Get the location in the source that produced a constraint.
-   E.g. for a precondition of a call, this returns the location of the call. *)
-val loc_of_constraint_origin : constraint_origin -> Lexing.position
-val describe_constraint_origin : constraint_origin -> string
-
 (* Calculate bl_in. This is essentially liveness analysis. *)
 val calculate_versions: block list -> unit

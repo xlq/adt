@@ -124,19 +124,6 @@ let dump_block (f: formatter) (bl: block) =
 let dump_blocks (f: formatter) (blocks: block list) =
    List.iter (dump_block f) blocks
 
-let loc_of_constraint_origin = function
-   | From_postconditions(_, loc, _)
-   | From_preconditions(_, loc, _)
-   | From_static_assertion(loc) -> loc
-
-let describe_constraint_origin = function
-   | From_postconditions(_, _, sub) ->
-      "a post-condition of " ^ describe_symbol sub
-   | From_preconditions(_, _, sub) ->
-      "a pre-condition of calling " ^ describe_symbol sub
-   | From_static_assertion(_) ->
-      "a static assertion"
-
 let all_variables (blocks: block list): unit Symbols.Maps.t =
    let vars = ref Symbols.Maps.empty in
    let rec search_expr = function
@@ -165,6 +152,9 @@ let all_variables (blocks: block list): unit Symbols.Maps.t =
          search_iterm tail
       | Inspect_type_term(loc, x, tail) ->
          vars := Symbols.Maps.add x () !vars;
+         search_iterm tail
+      | Static_assert_term(loc, e, tail) ->
+         search_expr e;
          search_iterm tail
    in
    List.iter (fun block ->

@@ -252,6 +252,9 @@ let rec type_check state iterm =
    | Call_term(call, tail) ->
       state.ts_calls <- call :: state.ts_calls;
       type_check state tail
+   | Static_assert_term(loc, e, tail) ->
+      ignore (now (type_check_expr (Some Boolean_type) e));
+      type_check state tail
 
 (* Try to resolve a subprogram call.
    Return true on success, false if there's not yet enough
@@ -491,6 +494,8 @@ let rec resolve_unknowns_in_iterm remaining iterm =
             | None -> ()
             | Some e -> resolve_unknowns_in_expr remaining e
       ) (snd call.call_arguments);
+      resolve_unknowns_in_iterm remaining tail
+   | Static_assert_term(loc, e, tail) ->
       resolve_unknowns_in_iterm remaining tail
 
 let rec report_unknowns iterm =
