@@ -278,21 +278,27 @@ and translate_block
 
 let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
-   let competing_declarations =
+   let competing_declarations, new_overload_num =
       match find scope name with
-         | [] -> []
-         | [x] when is_subprogram x -> [x]
+         | [] -> ([], 0)
+         | [{sym_info=Subprogram_sym(info)} as sub] ->
+            assert (info.sub_overload_num = 0);
+            info.sub_overload_num <- 1;
+            ([sub], 2)
          | [x] ->
             already_declared_error x sub.Parse_tree.sub_location;
-            []
+            ([], 0)
          | results ->
-            assert (List.for_all is_subprogram results);
-            results
+            (results, 1 + List.fold_left
+               (fun ax {sym_info=Subprogram_sym(info)} ->
+                  assert (info.sub_overload_num > 0);
+                  max ax info.sub_overload_num) 0 results)
    in
    let subprogram_info = {
       sub_parameters = [];
       sub_preconditions = [];
       sub_postconditions = [];
+      sub_overload_num = new_overload_num;
    } in
    let subprogram_sym =
       try
@@ -394,7 +400,7 @@ let translate_subprogram_body compiler state subprogram_sym sub =
          subprogram_info.sub_preconditions;
    Type_checking.type_check_blocks state.st_blocks;
    Constraint_checking.constraint_check_blocks state.st_blocks entry_point;
-   (*Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
+   Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
    state.st_blocks <- []
 
 let translate_declarations state scope declarations =
@@ -409,8 +415,8 @@ let translate_declarations state scope declarations =
 let finish_translation compiler state =
    let subs = state.st_subprograms in
    state.st_subprograms <- [];
-   (*List.iter (fun (sym, sub) ->
-      Backend_c.declare compiler sym) subs;*)
+   List.iter (fun (sym, sub) ->
+      Backend_c.declare compiler sym) subs;
    List.iter (fun (sym, sub) ->
       try translate_subprogram_body compiler state sym sub
       with Bail_out -> ()) subs

@@ -57,9 +57,10 @@ and symbol_info =
    | Parameter_sym of param_mode * ttype
 
 and subprogram_info = {
-   mutable sub_parameters : symbol list;
+   mutable sub_parameters    : symbol list;
    mutable sub_preconditions : expr list;
    mutable sub_postconditions: expr list;
+   mutable sub_overload_num  : int;
 }
 
 exception Already_defined of symbol
@@ -193,6 +194,13 @@ let dump_symbols () =
       prerr_endline ("Symbol " ^ full_name sym);
       List.iter dump_sym sym.sym_children
    in dump_sym root_symbol
+
+let same_types t1 t2 =
+   match t1, t2 with
+      | Boolean_type, Boolean_type
+      | Integer_type, Integer_type -> true
+      | Boolean_type, _ | _, Boolean_type
+      | Integer_type, _ | _, Integer_type -> false
 
 let free_variables e =
    let rec search vars = function

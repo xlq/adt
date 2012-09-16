@@ -76,9 +76,14 @@ and symbol_info =
    | Parameter_sym of param_mode * ttype
 
 and subprogram_info = {
-   mutable sub_parameters : symbol list;
+   mutable sub_parameters    : symbol list;
    mutable sub_preconditions : expr list;
    mutable sub_postconditions: expr list;
+   (* The overload number is used to produce unique symbol
+      names for overloaded symbols.
+      Equal to 0 for non-overloaded symbols.
+      Greater than 0 for overloaded symbols. *)
+   mutable sub_overload_num  : int;
 }
 
 exception Already_defined of symbol
@@ -110,6 +115,7 @@ val new_overloaded_symbol : symbol
                          -> symbol
 val new_version : symbol -> symbol_v
 val dump_symbols : unit -> unit
+val same_types : ttype -> ttype -> bool
 
 (* Return a list of all the free variables in an expression. *)
 val free_variables : expr -> symbol_v list

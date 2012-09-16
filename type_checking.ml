@@ -164,14 +164,6 @@ let same_mode a b =
       | In_out_parameter, In_out_parameter -> true
       | _ -> false
 
-(* XXX: This is very similar to coerce. *)
-let conflicting_types t1 t2 =
-   match t1, t2 with
-      | Boolean_type, Boolean_type
-      | Integer_type, Integer_type -> true
-      | Boolean_type, _ | _, Boolean_type
-      | Integer_type, _ | _, Integer_type -> false
-
 let check_overload
    (competing: symbol list)
    ({sym_declared = Some loc;
@@ -198,7 +190,7 @@ let check_overload
          let {sym_info = Parameter_sym(decl_mode, decl_t)} = decl_param in
          let {sym_info = Parameter_sym(mode, t)} = param in
          if (same_mode mode decl_mode)
-         && (conflicting_types t decl_t) then
+         && (same_types t decl_t) then
             (* Still conflicting. *)
             loop ((decl, decl_params)::filtered, decls, param::params)
          else
