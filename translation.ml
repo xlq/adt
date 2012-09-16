@@ -352,14 +352,7 @@ let translate_subprogram_body compiler state subprogram_sym sub =
          (Return_from(subprogram_sym))
          sub.Parse_tree.sub_body
    in
-   entry_point.bl_preconditions <- List.map
-      (fun precondition ->
-         (From_preconditions(
-            Symbols.loc_of_expression precondition,
-            subprogram_sym),
-          precondition))
-      subprogram_info.sub_preconditions;
-   (* Add parameters to bl_in (needed by calculate_versions). *)
+   (* Add parameters to bl_in (calculate_versions doesn't do this). *)
    entry_point.bl_in <-
       List.fold_left (fun bl_in param ->
          match param.sym_info with
@@ -380,7 +373,7 @@ let translate_subprogram_body compiler state subprogram_sym sub =
    dump_blocks f state.st_blocks;
    prerr_endline (get_fmt_str f);*)
    Type_checking.type_check_blocks state.st_blocks;
-   Constraint_checking.constraint_check_blocks state.st_blocks;
+   Constraint_checking.constraint_check_blocks state.st_blocks entry_point;
    (*Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;*)
    state.st_blocks <- []
 

@@ -11,9 +11,10 @@ let new_block_id () =
 type loc = Parse_tree.loc
 
 type constraint_origin =
-   | From_postconditions of Lexing.position * symbol
-   | From_preconditions of Lexing.position * symbol
+   | From_postconditions of Lexing.position * Lexing.position * symbol
+   | From_preconditions of Lexing.position * Lexing.position * symbol
    | From_static_assertion of Lexing.position
+
 
 type iterm =
    | Assignment_term of loc * expr * expr * iterm
@@ -124,14 +125,14 @@ let dump_blocks (f: formatter) (blocks: block list) =
    List.iter (dump_block f) blocks
 
 let loc_of_constraint_origin = function
-   | From_postconditions(loc, _)
-   | From_preconditions(loc, _)
+   | From_postconditions(_, loc, _)
+   | From_preconditions(_, loc, _)
    | From_static_assertion(loc) -> loc
 
 let describe_constraint_origin = function
-   | From_postconditions(_, sub) ->
+   | From_postconditions(_, _, sub) ->
       "a post-condition of " ^ describe_symbol sub
-   | From_preconditions(_, sub) ->
+   | From_preconditions(_, _, sub) ->
       "a pre-condition of calling " ^ describe_symbol sub
    | From_static_assertion(_) ->
       "a static assertion"

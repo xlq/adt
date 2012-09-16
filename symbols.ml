@@ -195,3 +195,13 @@ let dump_symbols () =
       prerr_endline ("Symbol " ^ full_name sym);
       List.iter dump_sym sym.sym_children
    in dump_sym root_symbol
+
+let free_variables e =
+   let rec search vars = function
+      | Boolean_literal _ -> vars
+      | Integer_literal _ -> vars
+      | Var_v(_,xv) -> xv::vars
+      | Negation(e) -> search vars e
+      | Comparison(_,lhs,rhs) ->
+         search (search vars lhs) rhs
+   in search [] e

@@ -15,8 +15,12 @@ type loc = Parse_tree.loc
 
 (* Reason why a constraint must be solved. *)
 type constraint_origin =
-   | From_postconditions of Lexing.position * symbol (* subprogram symbol *)
-   | From_preconditions of Lexing.position * symbol (* subprogram symbol *)
+   | From_postconditions of Lexing.position (* original location *)
+                          * Lexing.position (* Return_term location *)
+                          * symbol (* subprogram symbol *)
+   | From_preconditions of Lexing.position (* original location *)
+                         * Lexing.position (* call location *)
+                         * symbol (* subprogram symbol *)
    | From_static_assertion of Lexing.position
 
 type iterm =
@@ -80,6 +84,8 @@ and block =
 val new_block_id: unit -> int
 val dump_blocks: formatter -> block list -> unit
 
+(* Get the location in the source that produced a constraint.
+   E.g. for a precondition of a call, this returns the location of the call. *)
 val loc_of_constraint_origin : constraint_origin -> Lexing.position
 val describe_constraint_origin : constraint_origin -> string
 

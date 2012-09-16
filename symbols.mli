@@ -111,3 +111,6 @@ val new_overloaded_symbol : symbol
                          -> symbol
 val new_version : symbol -> symbol_v
 val dump_symbols : unit -> unit
+
+(* Return a list of all the free variables in an expression. *)
+val free_variables : expr -> symbol_v list

@@ -161,7 +161,9 @@ let rec check_iterm context iterm =
          List.iter (fun postcondition ->
             prove context
                (From_postconditions(
-                  ret.ret_location, ret.ret_subprogram))
+                  loc_of_expression postcondition,
+                  ret.ret_location,
+                  ret.ret_subprogram))
                (bind_versions
                   (fun x -> Symbols.Maps.find x ret.ret_versions)
                   postcondition)
@@ -176,13 +178,18 @@ let rec check_iterm context iterm =
          [{sym_info=Subprogram_sym(info)} as subprogram]
       } as call, tail)
    ->
-      let preconditions = ref info.sub_preconditions in
+      let preconditions = ref
+         (List.map (fun e -> (loc_of_expression e, e))
+            info.sub_preconditions)
+      in
       let postconditions = ref info.sub_postconditions in
       let invariants = ref [] in
       List.iter2
          (fun ({sym_info=Parameter_sym(mode,_)} as param)
               (arg_in, arg_out) ->
-            preconditions := List.map (subst param arg_in) !preconditions;
+            preconditions := List.map
+               (fun (loc, e) -> (loc, subst param arg_in e))
+               !preconditions;
             postconditions := List.map
                (subst param
                   (match mode, arg_out with
@@ -195,9 +202,9 @@ let rec check_iterm context iterm =
                         arg_out))
                !postconditions
          ) info.sub_parameters call.call_bound_arguments;
-      List.iter (fun constr ->
+      List.iter (fun (loc, constr) ->
          prove context
-            (From_preconditions(call.call_location, subprogram))
+            (From_preconditions(loc, call.call_location, subprogram))
             constr
       ) !preconditions;
       check_iterm
@@ -207,7 +214,7 @@ let rec check_iterm context iterm =
                   (List.rev_append !invariants context.cc_facts)}
          tail
 
-let constraint_check_blocks blocks =
+let constraint_check_blocks blocks entry_point =
    let changed = ref true in
    while !changed do
       changed := false;
@@ -217,8 +224,33 @@ let constraint_check_blocks blocks =
             cc_facts = List.map snd block.bl_preconditions;
          } in
          check_iterm context (unsome block.bl_body);
-         prerr_endline (string_of_int (List.length !(context.cc_unsolved))
-            ^ " unsolved constraints.")
+         List.iter (fun (origin, constr) ->
+            (* Add this unsolved constraint to this block's
+               preconditions iff the constraint doesn't contain
+               versions not in bl_in. *)
+            if (block != entry_point) (* cannot add preconditions to entry point *)
+            && (List.for_all
+               (fun xv ->
+                  (Symbols.Maps.find xv.ver_symbol block.bl_in) == xv)
+               (free_variables constr))
+            then begin
+               block.bl_preconditions <- (origin, constr)
+                  :: block.bl_preconditions;
+               changed := true
+            end else begin
+               Errors.semantic_error
+                  (loc_of_constraint_origin origin)
+                  ("Cannot prove `"
+                     ^ string_of_expr constr ^ "', "
+                     ^ describe_constraint_origin origin ^ ".");
+               begin match origin with
+                  | From_postconditions(loc,_,_)
+                  | From_preconditions(loc,_,_) ->
+                     Errors.semantic_error loc
+                        ("Original constraint was here.")
+                  | From_static_assertion _ -> ()
+               end
+            end
+        ) !(context.cc_unsolved)
       ) blocks
    done
-
