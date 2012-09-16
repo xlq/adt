@@ -157,6 +157,78 @@ let type_check_subprogram_declaration info =
    assert (match changes with {chg_incoming=[]; chg_outgoing=[]} -> true
                             | _ -> false)
 
+let same_mode a b =
+   match a, b with
+      | Const_parameter, Const_parameter
+      | In_parameter, In_parameter
+      | Out_parameter, Out_parameter
+      | In_out_parameter, In_out_parameter -> true
+      | _ -> false
+
+(* XXX: This is very similar to coerce. *)
+let conflicting_types t1 t2 =
+   match t1, t2 with
+      | Unit_type, Unit_type
+      | Boolean_type, Boolean_type
+      | Integer_type, Integer_type -> true
+      | Unit_type, _ | _, Unit_type
+      | Boolean_type, _ | _, Boolean_type
+      | Integer_type, _ | _, Integer_type -> false
+
+let check_overload
+   (competing: symbol list)
+   ({sym_declared = Some loc;
+     sym_info = Subprogram_sym(info)} as subprogram)
+=
+   let rec loop = function
+      | [], [], _ ->
+         (* There are no conflicting declarations. *)
+         []
+      | [], decls, [] ->
+         (* Remove declarations that have more parameters than this one. *)
+         List.filter
+            (function
+               | (_, []) -> true
+               | (_, _::_) -> false)
+            decls
+      | filtered, [], param::params ->
+         (* Next parameter. *)
+         loop ([], filtered, params)
+      | filtered, (decl, [])::decls, param::params ->
+         (* This declaration has fewer arguments. Filter it. *)
+         loop (filtered, decls, param::params)
+      | filtered, (decl, decl_param::decl_params)::decls, param::params ->
+         let {sym_info = Parameter_sym(decl_mode, decl_t)} = decl_param in
+         let {sym_info = Parameter_sym(mode, t)} = param in
+         if (same_mode mode decl_mode)
+         && (conflicting_types t decl_t) then
+            (* Still conflicting. *)
+            loop ((decl, decl_params)::filtered, decls, param::params)
+         else
+            loop (filtered, decls, param::params)
+   in
+   match loop
+      ([],
+       List.map
+         (fun ({sym_info = Subprogram_sym(info)} as subprogram) ->
+            (subprogram, info.sub_parameters)) competing,
+       info.sub_parameters)
+   with
+      | [] -> ()
+      | competing ->
+         Errors.semantic_error loc
+            ("Declaration of "
+               ^ describe_symbol subprogram
+               ^ " competes with "
+               ^ (match competing with
+                  | [_] -> " an earlier declaration."
+                  | _::_::_ -> " earlier declarations."));
+         List.iter (fun (competing, _) ->
+            Errors.semantic_error (unsome competing.sym_declared)
+               ("Conflicting declaration of "
+                  ^ describe_symbol competing ^ " is here.")
+         ) competing
+
 let rec type_check state iterm =
    match iterm with
    | Return_term(ret) ->

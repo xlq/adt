@@ -69,7 +69,7 @@ let report_previous_declaration sym =
       | None -> ()
       | Some loc ->
          Errors.semantic_error loc
-            "Previous declaration was here."
+            "Previous declaration is here."
 
 let already_declared_error old_sym new_loc =
    Errors.semantic_error new_loc
@@ -278,12 +278,17 @@ and translate_block
 
 let translate_subprogram_prototype state scope sub =
    match sub.Parse_tree.sub_name with [name] ->
-   begin match find scope name with
-      | [] -> ()
-      | [x] when is_subprogram x -> ()
-      | [x] -> already_declared_error x sub.Parse_tree.sub_location
-      | results -> ()
-   end;
+   let competing_declarations =
+      match find scope name with
+         | [] -> []
+         | [x] when is_subprogram x -> [x]
+         | [x] ->
+            already_declared_error x sub.Parse_tree.sub_location;
+            []
+         | results ->
+            assert (List.for_all is_subprogram results);
+            results
+   in
    let subprogram_info = {
       sub_parameters = [];
       sub_preconditions = [];
@@ -336,7 +341,12 @@ let translate_subprogram_prototype state scope sub =
    in
    subprogram_info.sub_preconditions <- pre;
    subprogram_info.sub_postconditions <- post;
+   (* Type-check the preconditions and postconditions. *)
    Type_checking.type_check_subprogram_declaration subprogram_info;
+   (* Check that the parameter types of this subprogram aren't the same as
+      those of another subprogram with the same name. (If they were, a call
+      to this subprogram would always be ambiguous.) *)
+   Type_checking.check_overload competing_declarations subprogram_sym;
    (* Translate the body later. *)
    state.st_subprograms <-
       (subprogram_sym, sub) :: state.st_subprograms

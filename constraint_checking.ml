@@ -247,7 +247,7 @@ let constraint_check_blocks blocks entry_point =
                   | From_postconditions(loc,_,_)
                   | From_preconditions(loc,_,_) ->
                      Errors.semantic_error loc
-                        ("Original constraint was here.")
+                        ("Original constraint is here.")
                   | From_static_assertion _ -> ()
                end
             end
