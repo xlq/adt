@@ -348,6 +348,9 @@ let type_check_call call =
       | [] -> raise (Failure "type_check_call") (* Already raised Bail_out. *)
       | _ ->
          (* Still not resolved. *)
+         call.call_candidates <-
+            List.map (fun candidate -> candidate.can_subprogram)
+               remaining_candidates;
          false
 
 (* TODO: Merge merge_types with coerce? *)
@@ -497,6 +500,21 @@ let type_check_blocks blocks =
       end
    done;
 
+   begin match state.ts_calls with
+      | [] -> ()
+      | remaining_calls ->
+         List.iter (fun ({call_candidates=first::_} as call) ->
+            Errors.semantic_error call.call_location
+               ("Call of overloaded subprogram `"
+                  ^ first.sym_name ^ "' is ambiguous.");
+            List.iter (fun subprogram ->
+               Errors.semantic_error (unsome subprogram.sym_declared)
+                  ("This definition of `" ^ first.sym_name
+                     ^ "' matches.")
+            ) call.call_candidates
+         ) remaining_calls
+   end;
+
    if !remaining then begin
       prerr_endline "Some unknowns remain!";
       (* Report types that were not inferred. *)
@@ -505,11 +523,6 @@ let type_check_blocks blocks =
       ) blocks
    end else begin
       prerr_endline "No unknowns remain. Good."
-   end;
-
-   begin match state.ts_calls with
-      | [] -> ()
-      | _ -> prerr_endline "Some subprograms remain unresolved!"
    end;
 
    prerr_endline "";
