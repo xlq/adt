@@ -12,7 +12,6 @@ and param_mode =
 
 type ttype =
    | Unknown_type of unknown
-   | Unit_type
    | Boolean_type
    | Integer_type
    | Uninitialised of ttype
@@ -114,7 +113,6 @@ let string_of_op = function
 let rec string_of_type = function
    | Unknown_type{unk_decided=Some t} -> "<unknown: " ^ string_of_type t ^ ">"
    | Unknown_type _ -> "<unknown>"
-   | Unit_type -> "Unit"
    | Boolean_type -> "Boolean"
    | Integer_type -> "Integer"
 

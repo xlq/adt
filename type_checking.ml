@@ -73,7 +73,6 @@ let now f =
 
 let rec coerce loc t1 t2 changes =
    match t1, t2 with
-      | Unit_type, Unit_type
       | Boolean_type, Boolean_type
       | Integer_type, Integer_type -> ()
       | Unknown_type(unk), t2 ->
@@ -168,10 +167,8 @@ let same_mode a b =
 (* XXX: This is very similar to coerce. *)
 let conflicting_types t1 t2 =
    match t1, t2 with
-      | Unit_type, Unit_type
       | Boolean_type, Boolean_type
       | Integer_type, Integer_type -> true
-      | Unit_type, _ | _, Unit_type
       | Boolean_type, _ | _, Boolean_type
       | Integer_type, _ | _, Integer_type -> false
 
@@ -428,7 +425,6 @@ let type_check_call call =
 (* TODO: Merge merge_types with coerce? *)
 let merge_types t1 t2 =
    try match t1, t2 with
-      | Unit_type, Unit_type -> Unit_type
       | Boolean_type, Boolean_type -> Boolean_type
       | Integer_type, Integer_type -> Integer_type
    with (Match_failure _) as e ->
@@ -447,7 +443,7 @@ let rec propagate_decision unk decided =
 
 let rec resolve_unknowns_in_type remaining t =
    match t with
-   | Unit_type | Boolean_type | Integer_type -> t
+   | Boolean_type | Integer_type -> t
    | Unknown_type({unk_decided = Some t}) -> t
    | Unknown_type({unk_decided = None} as unk) ->
       let rec fold result = function

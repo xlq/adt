@@ -14,7 +14,6 @@ type ttype =
       but the type will be known by the time type checking
       is complete. *)
    | Unknown_type of unknown
-   | Unit_type
    | Boolean_type
    | Integer_type
    | Uninitialised of ttype
