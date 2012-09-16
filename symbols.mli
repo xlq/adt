@@ -74,6 +74,7 @@ and symbol_info =
    | Subprogram_sym of subprogram_info
    | Variable_sym
    | Parameter_sym of param_mode * ttype
+   | Record_sym
 
 and subprogram_info = {
    mutable sub_parameters    : symbol list;

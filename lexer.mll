@@ -30,6 +30,10 @@ let keywords = create_hashtable 10 [
    "False",       FALSE;
    "in",          IN;
    "out",         OUT;
+   "case",        CASE;
+   "when",        WHEN;
+   "others",      OTHERS;
+   "record",      RECORD;
    "Inspect_Type", INSPECT_TYPE;
    "Static_Assert", STATIC_ASSERT;
 ]
@@ -60,6 +64,7 @@ rule scan = parse
    | ';'  { SEMICOLON }
    | '.'  { DOT }
    | ','  { COMMA }
+   | '|'  { MID }
    | ":=" { ASSIGN }
    | ".." { DOTDOT }
    | "=>" { RARROW }

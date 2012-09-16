@@ -24,13 +24,13 @@ let check_end (pos1, name1) (pos2, name2) =
 
 /* Keywords */
 %token PACKAGE PROCEDURE NULL END AND OR VAR IS IF THEN ELSE ELSIF
-%token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE
-%token INSPECT_TYPE STATIC_ASSERT IN OUT
+%token WHILE LOOP TYPE RANGE GIVEN TRUE FALSE CASE WHEN OTHERS
+%token INSPECT_TYPE STATIC_ASSERT IN OUT RECORD
 
 /* Punctuation */
 %token COLON SEMICOLON DOT DOTDOT COMMA ASSIGN RARROW
 %token LPAREN RPAREN LBRACKET RBRACKET LBRACE RBRACE
-%token EQ NE LT LE GT GE
+%token EQ NE LT LE GT GE MID
 
 /* Other */
 %token EOF
@@ -72,6 +72,7 @@ declarations:
 
 declaration:
    | subprogram { Subprogram $1 }
+   | TYPE IDENT IS type_decl SEMICOLON { Type_decl(rhs_start_pos 4, $2, $4) }
 
 subprogram:
    | PROCEDURE dotted_name opt_parameters IS
@@ -142,6 +143,43 @@ konstraint:
             constr_expr    = $2;
          }
       }
+
+type_decl:
+   | NULL RECORD { Record_type_decl([]) }
+   | RECORD record_fields END RECORD { Record_type_decl($2) }
+
+record_fields:
+   | NULL SEMICOLON { [] }
+   | ne_record_fields { $1 }
+
+ne_record_fields:
+   | record_field { [$1] }
+   | record_field ne_record_fields { $1::$2 }
+
+record_field:
+   | expr SEMICOLON
+      { Record_constraint($1) }
+   | IDENT COLON ttype SEMICOLON
+      { Record_field(pos(), $1, $3) }
+   | CASE expr IS variant_cases END CASE SEMICOLON
+      { Variant_record(pos(), $2, $4) }
+
+variant_cases:
+   | variant_case { [$1] }
+   | variant_case variant_cases { $1::$2 }
+
+variant_case:
+   | WHEN discrete_choices RARROW record_fields { ($2, $4) }
+
+discrete_choices:
+   | discrete_choice { [$1] }
+   | discrete_choice MID discrete_choices { $1::$3 }
+
+discrete_choice:
+   | expr { Expr_choice($1) }
+   | expr DOTDOT expr { Range_choice($1,$3) }
+   | IN ttype { Subtype_choice($2) }
+   | OTHERS { Others_choice }
 
 ne_statements:
    | NULL SEMICOLON

@@ -403,12 +403,25 @@ let translate_subprogram_body compiler state subprogram_sym sub =
    Backend_c.translate compiler subprogram_sym entry_point state.st_blocks;
    state.st_blocks <- []
 
+let translate_type_declaration state scope loc name decl =
+   begin match find scope name with
+      | [] -> ()
+      | sym::_ ->
+         already_declared_error sym loc;
+         raise Bail_out
+   end;
+   let type_sym = new_symbol scope name (Some loc) Record_sym in
+   (* TODO *)
+   ()
+
 let translate_declarations state scope declarations =
    List.iter (fun declaration ->
       try
          match declaration with
             | Parse_tree.Subprogram(sub) ->
                translate_subprogram_prototype state scope sub
+            | Parse_tree.Type_decl(loc, name, decl) ->
+               translate_type_declaration state scope loc name decl
       with Bail_out -> ()
    ) declarations
 
