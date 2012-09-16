@@ -430,6 +430,41 @@ let rec resolve_unknowns_in_iterm remaining iterm =
       ) (snd call.call_arguments);
       resolve_unknowns_in_iterm remaining tail
 
+let rec report_unknowns iterm =
+   let rec do_iterm = function
+      | Assignment_term(_, dest, _, tail) ->
+         do_expr dest;
+         do_iterm tail
+      | If_term(_, _, true_part, false_part) ->
+         do_iterm true_part;
+         do_iterm false_part
+      | Return_term _ -> ()
+      | Jump_term _ -> ()
+      | Call_term(call, tail) ->
+         List.iter (fun (_, arg_out) ->
+            match arg_out with
+               | None -> ()
+               | Some e -> do_expr e) (fst call.call_arguments);
+         List.iter (fun (_, (_, arg_out)) ->
+            match arg_out with
+               | None -> ()
+               | Some e -> do_expr e) (snd call.call_arguments);
+         do_iterm tail
+   and do_expr = function
+      | Boolean_literal _ -> ()
+      | Integer_literal _ -> ()
+      | Var_v(loc, xv) ->
+         begin match xv.ver_type with
+            | Unknown_type _ ->
+               Errors.semantic_error loc
+                  ("The type of " ^ describe_symbol xv.ver_symbol
+                     ^ " could not be inferred.")
+            | _ -> ()
+         end
+      | Negation(e) -> do_expr e
+      | Comparison(_, lhs, rhs) -> do_expr lhs; do_expr rhs
+   in do_iterm iterm
+
 let type_check_blocks blocks =
    let state = {ts_calls = []} in
    List.iter (fun block ->
@@ -463,7 +498,13 @@ let type_check_blocks blocks =
    done;
 
    if !remaining then begin
-      prerr_endline "Some unknowns remain!"
+      prerr_endline "Some unknowns remain!";
+      (* Report types that were not inferred. *)
+      List.iter (fun block ->
+         report_unknowns (unsome block.bl_body)
+      ) blocks
+   end else begin
+      prerr_endline "No unknowns remain. Good."
    end;
 
    begin match state.ts_calls with
