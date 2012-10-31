@@ -161,25 +161,6 @@ record_field:
       { Record_constraint($1) }
    | IDENT COLON ttype SEMICOLON
       { Record_field(pos(), $1, $3) }
-   | CASE expr IS variant_cases END CASE SEMICOLON
-      { Variant_record(pos(), $2, $4) }
-
-variant_cases:
-   | variant_case { [$1] }
-   | variant_case variant_cases { $1::$2 }
-
-variant_case:
-   | WHEN discrete_choices RARROW record_fields { ($2, $4) }
-
-discrete_choices:
-   | discrete_choice { [$1] }
-   | discrete_choice MID discrete_choices { $1::$3 }
-
-discrete_choice:
-   | expr { Expr_choice($1) }
-   | expr DOTDOT expr { Range_choice($1,$3) }
-   | IN ttype { Subtype_choice($2) }
-   | OTHERS { Others_choice }
 
 ne_statements:
    | NULL SEMICOLON

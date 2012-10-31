@@ -51,13 +51,6 @@ and type_decl =
 and record_field =
    | Record_constraint of expr
    | Record_field of loc * string * ttype
-   | Variant_record of loc * expr * (discrete_choice list * record_field list) list
-
-and discrete_choice =
-   | Expr_choice of expr
-   | Range_choice of expr * expr
-   | Subtype_choice of ttype
-   | Others_choice
 
 and ttype =
    | Named_type of loc * dotted_name
