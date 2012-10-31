@@ -17,6 +17,7 @@ type ttype =
    | Boolean_type
    | Integer_type
    | Uninitialised of ttype
+   | Record_type of symbol
 
 and unknown = {
    (* Incoming candidate types. These are types from
@@ -45,14 +46,14 @@ and expr =
 (* A symbol. Each symbol has one symbol object representing it - symbol objects
    can and should be compared physically (i.e. == not =). *)
 and symbol = {
-   sym_id               : int; (* unique identifier *)
-   sym_name             : string;
-   sym_declared         : Lexing.position option;
-   sym_parent           : symbol option;
-   mutable sym_children : symbol list;
-   mutable sym_info     : symbol_info;
-   mutable sym_last_version
-                        : int;
+   sym_id                  : int; (* unique identifier *)
+   sym_name                : string;
+   sym_declared            : Lexing.position option;
+   sym_parent              : symbol option;
+   mutable sym_children    : symbol list;
+   mutable sym_info        : symbol_info;
+   mutable sym_last_version: int;
+   mutable sym_translated  : bool;
 }
 
 (* A symbol_v is a version of a symbol. In constraints, etc., each symbol_v is
@@ -70,11 +71,13 @@ and symbol_v = {
 
 and symbol_info =
    | Unfinished_sym (* symbol_info not yet set *)
+   | Erroneous_sym (* symbol whose declaration was erroneous *)
    | Package_sym
    | Subprogram_sym of subprogram_info
    | Variable_sym
    | Parameter_sym of param_mode * ttype
-   | Record_sym
+   | Record_sym of expr list
+   | Field_sym of ttype
 
 and subprogram_info = {
    mutable sub_parameters    : symbol list;

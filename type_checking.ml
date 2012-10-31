@@ -438,7 +438,7 @@ let rec propagate_decision unk decided =
 
 let rec resolve_unknowns_in_type remaining t =
    match t with
-   | Boolean_type | Integer_type -> t
+   | Boolean_type | Integer_type | Record_type _ -> t
    | Unknown_type({unk_decided = Some t}) -> t
    | Unknown_type({unk_decided = None} as unk) ->
       let rec fold result = function

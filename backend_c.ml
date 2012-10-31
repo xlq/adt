@@ -9,7 +9,10 @@ let rec erase_type t =
    match t with
       | Boolean_type -> Boolean_type
       | Integer_type -> Integer_type
+      | Record_type record_sym -> Record_type record_sym
       | Uninitialised(t) -> erase_type t
+
+(* The collect_types functions create a symbol -> type map. *)
 
 let collect_types_type types loc x t =
    let t = erase_type t in
@@ -77,7 +80,7 @@ let c_name_of_local sym =
 
 let c_name_of_symbol sym =
    match sym.sym_info with
-      | Variable_sym | Parameter_sym _ ->
+      | Variable_sym | Parameter_sym _ | Field_sym _ ->
          c_name_of_local sym
       | _ ->
          String.concat "__" (dotted_name sym)
@@ -85,6 +88,7 @@ let c_name_of_symbol sym =
 let c_name_of_type = function
    | Boolean_type -> "bool"
    | Integer_type -> "int"
+   | Record_type record_sym -> "struct " ^ c_name_of_symbol record_sym
 
 let c_name_of_subprogram ({sym_info = Subprogram_sym(info)} as sym) =
    c_name_of_symbol sym
@@ -180,6 +184,31 @@ let translate_block f block =
    translate_icode f (unsome block.bl_body);
    undent f
 
+let rec declare_type f = function
+   | Boolean_type | Integer_type -> ()
+   | Uninitialised t -> declare_type f t
+   | Record_type record_sym ->
+      if not record_sym.sym_translated then begin
+         List.iter (fun {sym_info=Field_sym field_type} ->
+            declare_type f field_type) record_sym.sym_children;
+         puts f ("struct " ^ c_name_of_symbol record_sym ^ " {");
+         break f;
+         indent f;
+         List.iter (fun ({sym_info=Field_sym field_type} as field) ->
+            puts f (c_name_of_type field_type ^ " "
+               ^ c_name_of_symbol field ^ ";");
+            break f
+         ) record_sym.sym_children;
+         undent f;
+         puts f "};";
+         break f;
+         break f;
+         record_sym.sym_translated <- true
+      end
+
+let declare_types f types =
+   Symbols.Maps.iter (fun _ t -> declare_type f t) types
+
 let declare_locals f types =
    Symbols.Maps.iter (fun x t ->
       match x.sym_info with
@@ -229,13 +258,16 @@ let translate
 =
    start_output compiler;
    let f = new_formatter () in
+
+   let types = ref Symbols.Maps.empty in
+   collect_types_blocks types blocks;
+
+   declare_types f !types;
+
    declare_function f subprogram_sym;
    break f;
    puts f "{";
    break f; indent f;
-
-   let types = ref Symbols.Maps.empty in
-   collect_types_blocks types blocks;
 
    declare_locals f !types;
    break f;

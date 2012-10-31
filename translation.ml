@@ -135,10 +135,19 @@ let rec translate_type
       Boolean_type
    | Parse_tree.Named_type(loc, ["Integer"]) ->
       Integer_type
-   | Parse_tree.Named_type(loc, name) ->
-      Errors.semantic_error loc
-         ("Undefined type `" ^ String.concat "." name ^ "'.");
-      raise Bail_out
+   | Parse_tree.Named_type(loc, [name]) ->
+      begin match find scope name with
+      | [] ->
+         Errors.semantic_error loc
+            ("Undefined type `" ^ name ^ "'.");
+         raise Bail_out
+      | [{sym_info = Record_sym _} as type_sym] ->
+         Record_type type_sym
+      | sym::_ ->
+         Errors.semantic_error loc
+            ("Type expected but " ^ describe_symbol sym ^ " found.");
+         raise Bail_out
+      end
 
 let rec translate_expr
    (scope: symbol)
@@ -328,10 +337,14 @@ let translate_subprogram_prototype state scope sub =
                            (Some param.Parse_tree.param_location)
                            Unfinished_sym
                         in
-                        let t = translate_type
-                           scope param.Parse_tree.param_type
-                        in
-                        sym.sym_info <- Parameter_sym(param.Parse_tree.param_mode, t);
+                        begin try
+                           let t = translate_type
+                              scope param.Parse_tree.param_type in
+                           sym.sym_info <- Parameter_sym(param.Parse_tree.param_mode, t);
+                        with e ->
+                           sym.sym_info <- Erroneous_sym;
+                           raise e
+                        end;
                         sym :: parameters
                with Bail_out -> parameters
             ) sub.Parse_tree.sub_parameters [];
@@ -410,9 +423,28 @@ let translate_type_declaration state scope loc name decl =
          already_declared_error sym loc;
          raise Bail_out
    end;
-   let type_sym = new_symbol scope name (Some loc) Record_sym in
-   (* TODO *)
-   ()
+   let type_sym = new_symbol scope name (Some loc) Unfinished_sym in
+   match decl with
+   | Parse_tree.Record_type_decl(fields) ->
+      let constraints = ref [] in
+      let rec process_field = function
+         | Parse_tree.Record_constraint(e) ->
+            constraints :=
+               (translate_expr type_sym e) :: !constraints
+         | Parse_tree.Record_field(loc, name, t) ->
+            begin match find type_sym name with
+               | [] -> ()
+               | sym::_ ->
+                  already_declared_error sym loc;
+                  raise Bail_out
+            end;
+            let t = translate_type scope t in
+            let field_sym = new_symbol type_sym name
+               (Some loc) (Field_sym t) in
+            ignore field_sym;
+      in
+      List.iter process_field fields;
+      type_sym.sym_info <- Record_sym !constraints
 
 let translate_declarations state scope declarations =
    List.iter (fun declaration ->

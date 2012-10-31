@@ -15,6 +15,7 @@ type ttype =
    | Boolean_type
    | Integer_type
    | Uninitialised of ttype
+   | Record_type of symbol
 
 and unknown = {
    mutable unk_incoming : ttype list;
@@ -32,14 +33,14 @@ and expr =
    | Comparison of comparison * expr * expr
 
 and symbol = {
-   sym_id               : int;
-   sym_name             : string;
-   sym_declared         : Lexing.position option;
-   sym_parent           : symbol option;
-   mutable sym_children : symbol list;
-   mutable sym_info     : symbol_info;
-   mutable sym_last_version
-                        : int;
+   sym_id                  : int;
+   sym_name                : string;
+   sym_declared            : Lexing.position option;
+   sym_parent              : symbol option;
+   mutable sym_children    : symbol list;
+   mutable sym_info        : symbol_info;
+   mutable sym_last_version: int;
+   mutable sym_translated  : bool;
 }
 
 and symbol_v = {
@@ -51,11 +52,13 @@ and symbol_v = {
 
 and symbol_info =
    | Unfinished_sym
+   | Erroneous_sym
    | Package_sym
    | Subprogram_sym of subprogram_info
    | Variable_sym
    | Parameter_sym of param_mode * ttype
-   | Record_sym
+   | Record_sym of expr list
+   | Field_sym of ttype
 
 and subprogram_info = {
    mutable sub_parameters    : symbol list;
@@ -90,6 +93,7 @@ let root_symbol = {
    sym_children      = [];
    sym_info          = Package_sym;
    sym_last_version  = 0;
+   sym_translated    = false;
 }
 
 let dotted_name sym =
@@ -117,6 +121,7 @@ let rec string_of_type = function
    | Unknown_type _ -> "<unknown>"
    | Boolean_type -> "Boolean"
    | Integer_type -> "Integer"
+   | Record_type type_sym -> full_name type_sym
 
 let rec string_of_expr = function
    | Boolean_literal(_,true) -> "True"
@@ -137,6 +142,8 @@ let string_of_lvalue = function
 
 let describe_symbol sym =
    (match sym.sym_info with
+      | Unfinished_sym  -> "incomplete symbol"
+      | Erroneous_sym -> "erroneous symbol"
       | Package_sym     -> "package"
       | Subprogram_sym _-> "subprogram"
       | Variable_sym    -> "variable"
@@ -147,6 +154,8 @@ let describe_symbol sym =
             | Out_parameter -> "out "
             | In_out_parameter -> "in out "
             ) ^ "parameter"
+      | Record_sym _ -> "record type"
+      | Field_sym _ -> "field"
    ) ^ " `" ^ full_name sym ^ "'"
 
 let find_in scope name =
@@ -164,6 +173,7 @@ let new_overloaded_symbol scope name loc info =
       sym_children      = [];
       sym_info          = info;
       sym_last_version  = 0;
+      sym_translated    = false;
    } in
    scope.sym_children <- new_sym :: scope.sym_children;
    new_sym
@@ -200,8 +210,10 @@ let same_types t1 t2 =
    match t1, t2 with
       | Boolean_type, Boolean_type
       | Integer_type, Integer_type -> true
+      | Record_type s1, Record_type s2 -> s1 == s2
       | Boolean_type, _ | _, Boolean_type
-      | Integer_type, _ | _, Integer_type -> false
+      | Integer_type, _ | _, Integer_type
+      | Record_type _, _ | _, Record_type _ -> false
 
 let free_variables e =
    let rec search vars = function
